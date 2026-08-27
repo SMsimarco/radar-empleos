@@ -41,8 +41,25 @@ la planilla misma, no el workflow.
 
 **Cómo aplicar:** creá el Sheet, copiá el ID de la URL, reemplazá
 `TU_SHEET_ID_AQUI` en `workflow_rama_principal.json` (nodos "Leer ofertas
-ya vistas" y "Guardar en Sheet") y en `workflow_heartbeat.json` (nodo
-"Leer última corrida") antes de importar.
+ya vistas", "Leer perfil CV" y "Guardar en Sheet"), en
+`workflow_heartbeat.json` (nodo "Leer última corrida") y en
+`workflow_rama_cv.json` (nodo "Guardar perfil") antes de importar.
+
+## Tab "Perfil"
+
+La llena la rama CV, una fila por CV (2 filas normalmente: Automation
+Engineer y Full Stack):
+
+| Columna | Tipo | Quién la escribe |
+|---|---|---|
+| `cv_nombre` | texto | rama CV — nombre del archivo en Drive, es la clave de upsert |
+| `tecnologias` | texto (join con `, `) | rama CV — lista que extrajo la IA del texto del CV |
+| `fecha_actualizado` | fecha/hora ISO | rama CV |
+
+La rama principal lee esta tab en cada corrida y arma `CANDIDATO_STACK`
+como la unión de las tecnologías de todas las filas — no reprocesa los
+CVs, solo lee lo que la rama CV ya calculó. Si la tab está vacía (rama CV
+nunca corrió), usa una lista fallback hardcodeada en el propio Code node.
 
 ## Tab "Heartbeat"
 

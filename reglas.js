@@ -12,7 +12,10 @@ const MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA = 6;
 const MIN_COINCIDENCIAS_STACK = 2;
 
 // Stack real de Marco (perfil Full Stack / Automation Engineer, CLAUDE.md).
-// Editar acá cuando cambie el CV, no en el prompt de extracción.
+// En producción (workflow_rama_principal.json) esta lista es DINÁMICA — la
+// arma la rama CV a partir de los 2 CVs en Drive y la lee del Sheet en cada
+// corrida. Acá queda hardcodeada solo como fallback/referencia, para poder
+// testear el módulo sin depender de n8n ni del Sheet.
 // Un solo término por tecnología: "node" ya matchea "Node.js" via includes(),
 // no hace falta (ni conviene) listar sinónimos — cada entrada duplicada
 // inflaba el conteo de coincidencias.

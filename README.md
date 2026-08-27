@@ -14,17 +14,40 @@ alerta que vos ya configuraste.
 flowchart TD
     A[Cron diario] --> B[Leer alertas Gmail]
     A --> C[Leer ofertas ya vistas<br/>Sheet]
+    A --> M[Leer perfil CV<br/>Sheet]
     B --> D[Parsear ofertas<br/>split por link LinkedIn]
     D --> E[Preparar prompt IA]
     E --> F[Extraer datos con IA<br/>Claude Haiku]
     F --> G[Parsear respuesta IA]
     G --> H[Aplicar reglas de decisión]
     C -.dedup / ya postulado.-> H
+    M -.CANDIDATO_STACK dinámico.-> H
     H --> I[Guardar en Sheet<br/>upsert por dedup_key]
     I --> J[Armar mail resumen]
     J --> K[Enviar mail resumen]
     J --> L[Actualizar heartbeat]
 ```
+
+**Rama CV** (`workflow_rama_cv.json`, dispara sola con cambios en Drive):
+
+```mermaid
+flowchart TD
+    N[CV modificado<br/>Drive Trigger] --> O[Descargar CV]
+    O --> P{¿Es PDF?}
+    P -->|sí| Q[Extraer texto PDF]
+    P -->|no, Google Doc| R[Texto desde binario]
+    Q --> S[Unificar texto CV]
+    R --> S
+    S --> T[Preparar prompt IA]
+    T --> U[Extraer stack con IA<br/>Claude Haiku]
+    U --> V[Parsear respuesta IA]
+    V --> W[Armar fila de perfil]
+    W --> X[Guardar perfil<br/>tab Perfil, upsert por cv_nombre]
+```
+
+Igual que con las ofertas: la IA solo extrae la lista de tecnologías que
+aparecen literalmente en el CV, no opina sobre nivel. La rama principal
+lee el resultado (no reprocesa el CV en cada corrida diaria).
 
 **Error workflow** (`workflow_error.json`): n8n lo dispara solo cuando
 cualquier workflow que lo tenga configurado como Error Workflow falla.
@@ -35,8 +58,8 @@ rama principal no escribió su marca de "corrí OK" en las últimas 26hs,
 manda un mail. Cubre el caso de que el cron se desactive o el
 workflow quede roto sin tirar un error explícito.
 
-**Ramas CV y seguimiento** (arquitectura original, todavía no
-construidas): quedan para un paso posterior — avisar si se quieren ahora.
+**Rama seguimiento** (arquitectura original, todavía no construida):
+avisar si se quiere ahora.
 
 ## El contrato de decisión, en una frase
 
@@ -49,9 +72,9 @@ como incertidumbre, nunca como buena señal.
 
 ## Cómo importar
 
-1. En n8n: Workflows → Import from File → los 3 `.json` de esta carpeta
-   (`workflow_rama_principal.json`, `workflow_error.json`,
-   `workflow_heartbeat.json`).
+1. En n8n: Workflows → Import from File → los 4 `.json` de esta carpeta
+   (`workflow_rama_principal.json`, `workflow_rama_cv.json`,
+   `workflow_error.json`, `workflow_heartbeat.json`).
 2. Cada uno trae un Sticky Note en la esquina superior izquierda con la
    lista puntual de qué reemplazar antes de activarlo — seguí eso primero.
 3. En `workflow_rama_principal.json`, después de importar
@@ -66,8 +89,9 @@ Todas se crean en n8n (Credentials), nunca hardcodeadas en el JSON:
 | Credencial | Tipo n8n | Para qué |
 |---|---|---|
 | Gmail | OAuth2 | leer alertas + mandar el mail resumen + avisos de error/heartbeat |
-| Google Sheets | OAuth2 | leer/escribir el Sheet de ofertas y heartbeat |
-| Anthropic | Header Auth (`x-api-key` = `={{ $env.ANTHROPIC_API_KEY }}`) | extracción con Claude Haiku |
+| Google Sheets | OAuth2 | leer/escribir el Sheet de ofertas, perfil y heartbeat |
+| Google Drive | OAuth2 | rama CV — detectar cambios y descargar los CVs |
+| Anthropic | Header Auth (`x-api-key` = `={{ $env.ANTHROPIC_API_KEY }}`) | extracción con Claude Haiku (ofertas y CVs) |
 
 `ANTHROPIC_API_KEY` tiene que estar como variable de entorno del
 contenedor n8n en el Docker Compose del VPS (no en el JSON) — la
@@ -101,7 +125,11 @@ Las reglas viven en dos lugares que tenés que mantener sincronizados:
 Los umbrales que más vas a querer tocar están todos arriba de
 `reglas.js`: `MAX_ANIOS_TOLERADO`, `MAX_POSTULANTES_BAJA_COMPETENCIA`,
 `MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA`, `MIN_COINCIDENCIAS_STACK`,
-`CANDIDATO_STACK`, `TERMINOS_EXCLUYEN_PERFIL`.
+`TERMINOS_EXCLUYEN_PERFIL`. `CANDIDATO_STACK` es la excepción: en
+producción no se edita a mano, la arma la rama CV a partir de tus 2 CVs
+en Drive (tab "Perfil" del Sheet) — para cambiarla, actualizá el CV, no el
+código. El valor hardcodeado en `reglas.js` es solo el fallback/referencia
+para los tests.
 
 El prompt de extracción (lo que el LLM ve) está en
 [`prompts/extraccion_oferta.md`](./prompts/extraccion_oferta.md), también
@@ -125,8 +153,12 @@ tener algo fijo contra qué validar.
   `CANDIDATO_STACK` aparecen en el texto de la oferta, mínimo 2), no un
   análisis semántico. Un aviso que pida "backend" sin nombrar tecnologías
   puntuales no va a matchear aunque sea tu perfil exacto.
-- **No arma el CV ni la carta de presentación** — eso es la rama CV,
-  todavía no construida.
+- **No arma el CV ni la carta de presentación.** La rama CV solo lee tus
+  CVs existentes para saber qué tecnologías tenés, no genera nada.
+- **La rama CV solo maneja Google Doc y PDF.** Si guardás el CV como
+  `.docx` sin convertir, "¿Es PDF?" lo manda por la rama de Google Doc y
+  va a fallar al leer el binario como texto — convertilo a Google Doc o
+  PDF antes de subirlo a la carpeta que watchea el trigger.
 - **No trackea la postulación después de que la marcás en el Sheet más
   allá de avisar por fecha** — eso es la rama de seguimiento, tampoco
   construida todavía.
