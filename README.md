@@ -58,8 +58,25 @@ rama principal no escribió su marca de "corrí OK" en las últimas 26hs,
 manda un mail. Cubre el caso de que el cron se desactive o el
 workflow quede roto sin tirar un error explícito.
 
-**Rama seguimiento** (arquitectura original, todavía no construida):
-avisar si se quiere ahora.
+**Rama seguimiento** (`workflow_rama_seguimiento.json`, cron diario 9am):
+
+```mermaid
+flowchart TD
+    Y[Cron diario] --> Z[Leer postulaciones<br/>tab Ofertas]
+    Z --> AA[Filtrar y calcular alertas<br/>72h / 24h / 6h]
+    AA --> AB[Armar mail seguimiento]
+    AB --> AC[Enviar mail seguimiento]
+    AC --> AD[Reemitir filas]
+    AD --> AE[Actualizar avisado]
+```
+
+Lee las filas con `postulado=true` y `obligacion_fecha` cargada (las
+llenás vos a mano en el Sheet cuando te confirman entrevista/prueba
+técnica). Si falta ≤72hs, ≤24hs, o ≤6hs y ese tramo todavía no se avisó,
+lo junta con lo demás urgente del día en UN solo mail (no uno por
+oferta) y marca el tramo como avisado. Al ser cron diario (como pedías),
+los tramos son aproximados, no exactos a la hora — documentado en el
+Sticky Note del workflow.
 
 ## El contrato de decisión, en una frase
 
@@ -72,9 +89,10 @@ como incertidumbre, nunca como buena señal.
 
 ## Cómo importar
 
-1. En n8n: Workflows → Import from File → los 4 `.json` de esta carpeta
+1. En n8n: Workflows → Import from File → los 5 `.json` de esta carpeta
    (`workflow_rama_principal.json`, `workflow_rama_cv.json`,
-   `workflow_error.json`, `workflow_heartbeat.json`).
+   `workflow_rama_seguimiento.json`, `workflow_error.json`,
+   `workflow_heartbeat.json`).
 2. Cada uno trae un Sticky Note en la esquina superior izquierda con la
    lista puntual de qué reemplazar antes de activarlo — seguí eso primero.
 3. En `workflow_rama_principal.json`, después de importar
@@ -159,9 +177,16 @@ tener algo fijo contra qué validar.
   `.docx` sin convertir, "¿Es PDF?" lo manda por la rama de Google Doc y
   va a fallar al leer el binario como texto — convertilo a Google Doc o
   PDF antes de subirlo a la carpeta que watchea el trigger.
-- **No trackea la postulación después de que la marcás en el Sheet más
-  allá de avisar por fecha** — eso es la rama de seguimiento, tampoco
-  construida todavía.
+- **La rama seguimiento es cron diario, no exacta a la hora.** Los tramos
+  72/24/6hs son aproximados — si una obligación pasa de "más de 72hs" a
+  "menos de 24hs" entre una corrida y la siguiente, se manda el aviso más
+  urgente sin avisar y se saltea el de 72hs.
+- **Si la fecha de la obligación vence y ya se avisó el tramo de 6hs, no
+  vuelve a avisar.** Hay que actualizar el Sheet a mano (marcar el
+  resultado, borrar `obligacion_fecha`, lo que corresponda).
+- **La rama seguimiento no lee tu calendario ni tu mail para detectar la
+  obligación sola** — vos cargás `obligacion_tipo` y `obligacion_fecha` a
+  mano en el Sheet cuando te confirman algo.
 - **El heartbeat depende de que la rama principal llegue al nodo final**
   ("Actualizar heartbeat"). Si el workflow completo se desactiva en n8n
   (no falla, directamente no corre), no hay error que dispare el Error

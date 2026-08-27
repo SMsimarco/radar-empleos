@@ -1,9 +1,10 @@
 # Esquema de la planilla — Google Sheets "Radar Empleos"
 
 Una sola hoja de cálculo, tab **"Ofertas"**. Guarda tanto el log de todo lo
-visto (para dedup) como el estado de las postulaciones (para la rama de
-seguimiento que viene en un paso posterior) — mismas columnas sirven para
-las dos cosas, no hace falta una segunda tab todavía.
+visto (para dedup) como el estado de las postulaciones (lo que usa la rama
+seguimiento) — mismas columnas sirven para las dos cosas, no hace falta una
+segunda tab para eso. Además hay tabs separadas "Perfil" y "Heartbeat" (ver
+abajo), una por cada cosa que necesita su propia clave de upsert.
 
 Crear el Sheet a mano, poner estos headers en la fila 1 (orden exacto,
 las columnas nuevas por comparar con lo que ya conocías del proyecto):
@@ -32,7 +33,7 @@ las columnas nuevas por comparar con lo que ya conocías del proyecto):
 | `fecha_postulacion` | fecha | **Marco, a mano** |
 | `obligacion_tipo` | texto | **Marco, a mano** — "entrevista", "prueba técnica", "esperando respuesta" |
 | `obligacion_fecha` | fecha/hora | **Marco, a mano** — vencimiento de la obligación |
-| `avisado_72h` / `avisado_24h` / `avisado_6h` | booleano | rama de seguimiento (paso futuro) — evita avisos duplicados |
+| `avisado_72h` / `avisado_24h` / `avisado_6h` | booleano | rama seguimiento — evita avisos duplicados |
 
 `dedup_key` es la columna que lee la rama principal en cada corrida para
 saber "esto ya lo vi" y "ya me postulé" (cruzando con `postulado`). El
