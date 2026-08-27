@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OfertaExtraida",
+  "description": "Contrato de salida del nodo de extracción IA. Ver extraccion_oferta.md v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "empresa",
+    "puesto",
+    "modalidad",
+    "ubicacion_requerida",
+    "tipo_contrato",
+    "horas_semanales",
+    "salario_min",
+    "salario_max",
+    "salario_moneda",
+    "anios_experiencia_min",
+    "anios_excluyente",
+    "titulo_requerido",
+    "titulo_excluyente",
+    "frases_exclusion",
+    "stack",
+    "postulantes",
+    "antiguedad_horas",
+    "postulacion_rapida",
+    "link",
+    "confianza_extraccion"
+  ],
+  "properties": {
+    "empresa": { "type": ["string", "null"] },
+    "puesto": { "type": ["string", "null"] },
+    "modalidad": { "enum": ["remoto", "híbrido", "presencial", null] },
+    "ubicacion_requerida": { "type": ["string", "null"] },
+    "tipo_contrato": { "enum": ["full time", "part time", "freelance", "pasantía", null] },
+    "horas_semanales": { "type": ["number", "null"] },
+    "salario_min": { "type": ["number", "null"] },
+    "salario_max": { "type": ["number", "null"] },
+    "salario_moneda": { "type": ["string", "null"] },
+    "anios_experiencia_min": { "type": ["number", "null"] },
+    "anios_excluyente": { "type": ["boolean", "null"] },
+    "titulo_requerido": { "type": ["string", "null"] },
+    "titulo_excluyente": { "type": ["boolean", "null"] },
+    "frases_exclusion": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stack": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "postulantes": { "type": ["number", "null"] },
+    "antiguedad_horas": { "type": ["number", "null"] },
+    "postulacion_rapida": { "type": ["boolean", "null"] },
+    "link": { "type": ["string", "null"] },
+    "confianza_extraccion": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}
