@@ -23,29 +23,31 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const err = $json;\n\nconst nombreWorkflow = err.workflow ? err.workflow.name : 'desconocido';\nconst nodoFallido = err.execution && err.execution.error && err.execution.error.node\n  ? err.execution.error.node.name\n  : (err.trigger && err.trigger.node) || 'desconocido';\nconst mensajeError = (err.execution && err.execution.error && err.execution.error.message)\n  || (err.execution && err.execution.lastNodeExecuted)\n  || JSON.stringify(err).slice(0, 500);\nconst urlEjecucion = err.execution ? err.execution.url : null;\n\nconst texto = [\n  '⚠️ Radar de empleos — falló un workflow',\n  `Workflow: ${nombreWorkflow}`,\n  `Nodo: ${nodoFallido}`,\n  `Error: ${mensajeError}`,\n  urlEjecucion ? `Ejecución: ${urlEjecucion}` : null,\n].filter(Boolean).join('\\n');\n\nreturn { json: { texto } };"
+        "jsCode": "const err = $json;\n\nconst nombreWorkflow = err.workflow ? err.workflow.name : 'desconocido';\nconst nodoFallido = err.execution && err.execution.error && err.execution.error.node\n  ? err.execution.error.node.name\n  : (err.trigger && err.trigger.node) || 'desconocido';\nconst mensajeError = (err.execution && err.execution.error && err.execution.error.message)\n  || (err.execution && err.execution.lastNodeExecuted)\n  || JSON.stringify(err).slice(0, 500);\nconst urlEjecucion = err.execution ? err.execution.url : null;\n\nconst texto = [\n  `Workflow: ${nombreWorkflow}`,\n  `Nodo: ${nodoFallido}`,\n  `Error: ${mensajeError}`,\n  urlEjecucion ? `Ejecución: ${urlEjecucion}` : null,\n].filter(Boolean).join('\\n');\n\nreturn { json: { asunto: `⚠️ Radar de empleos — falló ${nombreWorkflow}`, texto } };"
       }
     },
     {
-      "id": "avisar-telegram-error",
-      "name": "Avisar por Telegram",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
+      "id": "avisar-mail-error",
+      "name": "Avisar por Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
       "position": [
         280,
         100
       ],
       "parameters": {
         "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "REEMPLAZAR_CHAT_ID",
-        "text": "={{ $json.texto }}",
-        "additionalFields": {}
+        "operation": "send",
+        "sendTo": "REEMPLAZAR@ejemplo.com",
+        "subject": "={{ $json.asunto }}",
+        "emailType": "text",
+        "message": "={{ $json.texto }}",
+        "options": {}
       },
       "credentials": {
-        "telegramApi": {
+        "gmailOAuth2": {
           "id": "REEMPLAZAR",
-          "name": "Telegram — Radar Empleos"
+          "name": "Gmail account"
         }
       }
     },
@@ -61,7 +63,7 @@
       "parameters": {
         "width": 460,
         "height": 200,
-        "content": "## Error workflow\n\nNo lo dispares a mano — n8n lo llama solo cuando otro workflow\nfalla y lo tiene configurado como \"Error Workflow\" en\nConfiguración. Importar esto primero, copiar el ID del workflow\n(URL al abrirlo), pegarlo en Settings > Error Workflow de\n`workflow_rama_principal.json` y de las ramas CV/seguimiento cuando existan.\n\nCredencial Telegram: crear bot con @BotFather, conseguir chat_id\nmandándole un mensaje y leyendo `getUpdates`."
+        "content": "## Error workflow\n\nNo lo dispares a mano — n8n lo llama solo cuando otro workflow\nfalla y lo tiene configurado como \"Error Workflow\" en\nConfiguración. Importar esto primero, copiar el ID del workflow\n(URL al abrirlo), pegarlo en Settings > Error Workflow de\n`workflow_rama_principal.json` y de las ramas CV/seguimiento cuando existan.\n\nReemplazar `REEMPLAZAR@ejemplo.com` por tu mail y seleccionar la\ncredencial Gmail (la misma que usa la rama principal)."
       }
     }
   ],
@@ -81,7 +83,7 @@
       "main": [
         [
           {
-            "node": "Avisar por Telegram",
+            "node": "Avisar por Gmail",
             "type": "main",
             "index": 0
           }

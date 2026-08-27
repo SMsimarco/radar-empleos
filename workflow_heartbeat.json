@@ -68,7 +68,7 @@
       ],
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const fila = $input.all()[0];\nconst ultimaCorridaTexto = fila ? fila.json.ultima_corrida : null;\n\nif (!ultimaCorridaTexto) {\n  return [{ json: { alerta: true, texto: '⚠️ Radar de empleos: la rama principal nunca registró una corrida (tab Heartbeat vacía). Revisar si el cron está activo.' } }];\n}\n\nconst ultimaCorrida = new Date(ultimaCorridaTexto);\nconst horas = (Date.now() - ultimaCorrida.getTime()) / 1000 / 60 / 60;\nconst LIMITE_HORAS = 26;\n\nif (horas > LIMITE_HORAS) {\n  return [{ json: {\n    alerta: true,\n    texto: `⚠️ Radar de empleos: la rama principal no corrió en ${horas.toFixed(1)}hs (límite ${LIMITE_HORAS}hs). Última corrida: ${ultimaCorridaTexto}.`,\n  } }];\n}\n\nreturn [{ json: { alerta: false, horas } }];"
+        "jsCode": "const fila = $input.all()[0];\nconst ultimaCorridaTexto = fila ? fila.json.ultima_corrida : null;\n\nif (!ultimaCorridaTexto) {\n  return [{ json: {\n    alerta: true,\n    asunto: '⚠️ Radar de empleos — nunca registró una corrida',\n    texto: 'La tab Heartbeat está vacía. Revisar si el cron de la rama principal está activo.',\n  } }];\n}\n\nconst ultimaCorrida = new Date(ultimaCorridaTexto);\nconst horas = (Date.now() - ultimaCorrida.getTime()) / 1000 / 60 / 60;\nconst LIMITE_HORAS = 26;\n\nif (horas > LIMITE_HORAS) {\n  return [{ json: {\n    alerta: true,\n    asunto: '⚠️ Radar de empleos — silencio de más de 26hs',\n    texto: `La rama principal no corrió en ${horas.toFixed(1)}hs (límite ${LIMITE_HORAS}hs). Última corrida: ${ultimaCorridaTexto}.`,\n  } }];\n}\n\nreturn [{ json: { alerta: false, horas } }];"
       }
     },
     {
@@ -103,25 +103,27 @@
       }
     },
     {
-      "id": "avisar-telegram-heartbeat",
-      "name": "Avisar por Telegram",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
+      "id": "avisar-mail-heartbeat",
+      "name": "Avisar por Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
       "position": [
         760,
         60
       ],
       "parameters": {
         "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "REEMPLAZAR_CHAT_ID",
-        "text": "={{ $json.texto }}",
-        "additionalFields": {}
+        "operation": "send",
+        "sendTo": "REEMPLAZAR@ejemplo.com",
+        "subject": "={{ $json.asunto }}",
+        "emailType": "text",
+        "message": "={{ $json.texto }}",
+        "options": {}
       },
       "credentials": {
-        "telegramApi": {
+        "gmailOAuth2": {
           "id": "REEMPLAZAR",
-          "name": "Telegram — Radar Empleos"
+          "name": "Gmail account"
         }
       }
     },
@@ -137,7 +139,7 @@
       "parameters": {
         "width": 460,
         "height": 220,
-        "content": "## Heartbeat\n\nCorre solo, cada hora. Lee la tab \"Heartbeat\" del mismo Sheet\n(columna `ultima_corrida`, la escribe la rama principal al terminar\nOK). Si pasaron más de 26hs sin corrida, o la tab está vacía\n(nunca corrió), avisa por Telegram.\n\nSi este workflow AGREGA a `TU_SHEET_ID_AQUI` sin haber corrido nunca\nla rama principal, va a alertar de entrada — esperado, significa\n\"todavía no hay heartbeat registrado\"."
+        "content": "## Heartbeat\n\nCorre solo, cada hora. Lee la tab \"Heartbeat\" del mismo Sheet\n(columna `ultima_corrida`, la escribe la rama principal al terminar\nOK). Si pasaron más de 26hs sin corrida, o la tab está vacía\n(nunca corrió), avisa por Gmail.\n\nReemplazar `REEMPLAZAR@ejemplo.com` por tu mail y seleccionar la\ncredencial Gmail (la misma que usa la rama principal).\n\nSi este workflow arranca sin haber corrido nunca la rama principal,\nva a alertar de entrada — esperado, significa \"todavía no hay\nheartbeat registrado\"."
       }
     }
   ],
@@ -179,7 +181,7 @@
       "main": [
         [
           {
-            "node": "Avisar por Telegram",
+            "node": "Avisar por Gmail",
             "type": "main",
             "index": 0
           }

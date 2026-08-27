@@ -28,11 +28,11 @@ flowchart TD
 
 **Error workflow** (`workflow_error.json`): n8n lo dispara solo cuando
 cualquier workflow que lo tenga configurado como Error Workflow falla.
-Manda por Telegram: nombre del workflow, nodo que falló, mensaje de error.
+Manda un mail: nombre del workflow, nodo que falló, mensaje de error.
 
 **Heartbeat** (`workflow_heartbeat.json`): corre solo, cada hora. Si la
 rama principal no escribió su marca de "corrí OK" en las últimas 26hs,
-avisa por Telegram. Cubre el caso de que el cron se desactive o el
+manda un mail. Cubre el caso de que el cron se desactive o el
 workflow quede roto sin tirar un error explícito.
 
 **Ramas CV y seguimiento** (arquitectura original, todavía no
@@ -65,10 +65,9 @@ Todas se crean en n8n (Credentials), nunca hardcodeadas en el JSON:
 
 | Credencial | Tipo n8n | Para qué |
 |---|---|---|
-| Gmail | OAuth2 | leer alertas + mandar el mail resumen |
+| Gmail | OAuth2 | leer alertas + mandar el mail resumen + avisos de error/heartbeat |
 | Google Sheets | OAuth2 | leer/escribir el Sheet de ofertas y heartbeat |
 | Anthropic | Header Auth (`x-api-key` = `={{ $env.ANTHROPIC_API_KEY }}`) | extracción con Claude Haiku |
-| Telegram | Telegram API (bot token de @BotFather) | error workflow + heartbeat |
 
 `ANTHROPIC_API_KEY` tiene que estar como variable de entorno del
 contenedor n8n en el Docker Compose del VPS (no en el JSON) — la
