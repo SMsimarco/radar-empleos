@@ -1,5 +1,5 @@
 {
-  "name": "Radar de empleos — rama principal",
+  "name": "Radar de empleos",
   "nodes": [
     {
       "typeVersion": 1.2,
@@ -166,7 +166,7 @@
       "type": "n8n-nodes-base.code",
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "// Mirror de C:\\\\Users\\\\marco\\\\radar-empleos\\\\reglas.js — si cambiás una\n// regla, cambiala ahí primero, corré `node --test tests/`, y después pegala\n// acá. Los 10 tests de reglas.js son la referencia de qué tiene que pasar.\nconst MAX_ANIOS_TOLERADO = 3;\nconst MAX_POSTULANTES_BAJA_COMPETENCIA = 25;\nconst MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA = 6;\nconst MIN_COINCIDENCIAS_STACK = 2;\n// Fallback si la rama CV todavía no procesó ningún CV (tab \"Perfil\" vacía).\nconst CANDIDATO_STACK_FALLBACK = ['react', 'node', 'express', 'javascript', 'php', 'postgres', 'supabase', 'html', 'css', 'n8n'];\nconst filasPerfil = $('Leer perfil CV').all().map((i) => i.json);\nconst stackDesdeCV = [...new Set(\n  filasPerfil.flatMap((f) => (f.tecnologias || '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))\n)];\nconst CANDIDATO_STACK = stackDesdeCV.length > 0 ? stackDesdeCV : CANDIDATO_STACK_FALLBACK;\nconst TERMINOS_EXCLUYEN_PERFIL = ['junior', 'entry level', 'entry-level', 'recent grad', 'recent graduate', 'bootcamp', 'no bootcamp'];\n\nfunction normalizarEmpresaPuesto(empresa, puesto) {\n  const normalizar = (texto) => (texto || '')\n    .toLowerCase()\n    .normalize('NFD').replace(new RegExp('[̀-ͯ]', 'g'), '')\n    .replace(/\\b(s\\.?a\\.?|s\\.?r\\.?l\\.?|inc\\.?|ltd\\.?|llc\\.?)\\b/g, '')\n    .replace(/[^a-z0-9]+/g, ' ')\n    .trim();\n  return `${normalizar(empresa)}::${normalizar(puesto)}`;\n}\n\nfunction contarCoincidenciasStack(ofertaStack) {\n  const stackOferta = (ofertaStack || []).map((t) => t.toLowerCase());\n  return CANDIDATO_STACK.filter((tech) => stackOferta.some((t) => t.includes(tech) || tech.includes(t))).length;\n}\n\nfunction fraseExcluyePerfil(frasesExclusion) {\n  const texto = (frasesExclusion || []).join(' ').toLowerCase();\n  return TERMINOS_EXCLUYEN_PERFIL.find((t) => texto.includes(t)) || null;\n}\n\nconst oferta = $json;\n\nif (oferta.error_extraccion) {\n  return { json: { ...oferta, estado: 'MIRAR', motivo: 'El modelo no devolvió JSON válido — revisar a mano.', dedup_key: null } };\n}\n\nconst dedupKey = normalizarEmpresaPuesto(oferta.empresa, oferta.puesto);\nconst vistas = $('Leer ofertas ya vistas').all().map((i) => i.json);\nconst yaPostulado = vistas.some((v) => v.dedup_key === dedupKey && String(v.postulado).toLowerCase() === 'true');\n\nlet estado, motivo;\n\nif (yaPostulado) {\n  estado = 'DESCARTAR';\n  motivo = 'Ya te postulaste a este puesto en esta empresa.';\n} else if (oferta.anios_experiencia_min > MAX_ANIOS_TOLERADO && oferta.anios_excluyente === true) {\n  estado = 'DESCARTAR';\n  motivo = `Pide ${oferta.anios_experiencia_min}+ años de experiencia de forma excluyente.`;\n} else if (oferta.titulo_excluyente === true) {\n  estado = 'DESCARTAR';\n  motivo = `Pide título (${oferta.titulo_requerido || 'sin especificar'}) de forma excluyente.`;\n} else {\n  const fraseExcluyente = fraseExcluyePerfil(oferta.frases_exclusion);\n  if (fraseExcluyente) {\n    const cita = (oferta.frases_exclusion || []).find((f) => f.toLowerCase().includes(fraseExcluyente));\n    estado = 'DESCARTAR';\n    motivo = `El aviso excluye tu perfil: \"${cita}\"`;\n  } else {\n    const coincidencias = contarCoincidenciasStack(oferta.stack);\n    const coincidenciaReal = coincidencias >= MIN_COINCIDENCIAS_STACK;\n    const seniales = [];\n    if (oferta.postulantes !== null && oferta.postulantes !== undefined && oferta.postulantes < MAX_POSTULANTES_BAJA_COMPETENCIA) seniales.push(`${oferta.postulantes} postulantes`);\n    if (oferta.antiguedad_horas !== null && oferta.antiguedad_horas !== undefined && oferta.antiguedad_horas < MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA) seniales.push(`publicada hace ${oferta.antiguedad_horas}hs`);\n    if (oferta.postulacion_rapida === true) seniales.push('postulación rápida disponible');\n    const competenciaBaja = seniales.length > 0;\n\n    if (coincidenciaReal && competenciaBaja) {\n      estado = 'POSTULAR YA';\n      motivo = `Stack coincide (${coincidencias} tecnologías) y competencia baja: ${seniales.join(', ')}.`;\n    } else if (!coincidenciaReal) {\n      estado = 'MIRAR';\n      motivo = `Stack no coincide lo suficiente (${coincidencias}/${MIN_COINCIDENCIAS_STACK} tecnologías).`;\n    } else {\n      estado = 'MIRAR';\n      motivo = 'Sin datos de competencia — incierto, no se asume baja competencia.';\n    }\n  }\n}\n\nreturn { json: { ...oferta, dedup_key: dedupKey, estado, motivo, stack_join: (oferta.stack || []).join(', ') } };"
+        "jsCode": "// Mirror de C:\\\\Users\\\\marco\\\\radar-empleos\\\\reglas.js — si cambiás una\n// regla, cambiala ahí primero, corré `node --test tests/`, y después pegala\n// acá. Los 10 tests de reglas.js son la referencia de qué tiene que pasar.\nconst MAX_ANIOS_TOLERADO = 3;\nconst MAX_POSTULANTES_BAJA_COMPETENCIA = 25;\nconst MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA = 6;\nconst MIN_COINCIDENCIAS_STACK = 2;\n// Stack real de Marco (perfil Full Stack / Automation Engineer). Editar\n// acá a mano cuando cambie el CV.\nconst CANDIDATO_STACK = ['react', 'node', 'express', 'javascript', 'php', 'postgres', 'supabase', 'html', 'css', 'n8n'];\nconst TERMINOS_EXCLUYEN_PERFIL = ['junior', 'entry level', 'entry-level', 'recent grad', 'recent graduate', 'bootcamp', 'no bootcamp'];\n\nfunction normalizarEmpresaPuesto(empresa, puesto) {\n  const normalizar = (texto) => (texto || '')\n    .toLowerCase()\n    .normalize('NFD').replace(new RegExp('[̀-ͯ]', 'g'), '')\n    .replace(/\\b(s\\.?a\\.?|s\\.?r\\.?l\\.?|inc\\.?|ltd\\.?|llc\\.?)\\b/g, '')\n    .replace(/[^a-z0-9]+/g, ' ')\n    .trim();\n  return `${normalizar(empresa)}::${normalizar(puesto)}`;\n}\n\nfunction contarCoincidenciasStack(ofertaStack) {\n  const stackOferta = (ofertaStack || []).map((t) => t.toLowerCase());\n  return CANDIDATO_STACK.filter((tech) => stackOferta.some((t) => t.includes(tech) || tech.includes(t))).length;\n}\n\nfunction fraseExcluyePerfil(frasesExclusion) {\n  const texto = (frasesExclusion || []).join(' ').toLowerCase();\n  return TERMINOS_EXCLUYEN_PERFIL.find((t) => texto.includes(t)) || null;\n}\n\nconst oferta = $json;\n\nif (oferta.error_extraccion) {\n  return { json: { ...oferta, estado: 'MIRAR', motivo: 'El modelo no devolvió JSON válido — revisar a mano.', dedup_key: null } };\n}\n\nconst dedupKey = normalizarEmpresaPuesto(oferta.empresa, oferta.puesto);\nconst vistas = $('Leer ofertas ya vistas').all().map((i) => i.json);\nconst yaPostulado = vistas.some((v) => v.dedup_key === dedupKey && String(v.postulado).toLowerCase() === 'true');\n\nlet estado, motivo;\n\nif (yaPostulado) {\n  estado = 'DESCARTAR';\n  motivo = 'Ya te postulaste a este puesto en esta empresa.';\n} else if (oferta.anios_experiencia_min > MAX_ANIOS_TOLERADO && oferta.anios_excluyente === true) {\n  estado = 'DESCARTAR';\n  motivo = `Pide ${oferta.anios_experiencia_min}+ años de experiencia de forma excluyente.`;\n} else if (oferta.titulo_excluyente === true) {\n  estado = 'DESCARTAR';\n  motivo = `Pide título (${oferta.titulo_requerido || 'sin especificar'}) de forma excluyente.`;\n} else {\n  const fraseExcluyente = fraseExcluyePerfil(oferta.frases_exclusion);\n  if (fraseExcluyente) {\n    const cita = (oferta.frases_exclusion || []).find((f) => f.toLowerCase().includes(fraseExcluyente));\n    estado = 'DESCARTAR';\n    motivo = `El aviso excluye tu perfil: \"${cita}\"`;\n  } else {\n    const coincidencias = contarCoincidenciasStack(oferta.stack);\n    const coincidenciaReal = coincidencias >= MIN_COINCIDENCIAS_STACK;\n    const seniales = [];\n    if (oferta.postulantes !== null && oferta.postulantes !== undefined && oferta.postulantes < MAX_POSTULANTES_BAJA_COMPETENCIA) seniales.push(`${oferta.postulantes} postulantes`);\n    if (oferta.antiguedad_horas !== null && oferta.antiguedad_horas !== undefined && oferta.antiguedad_horas < MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA) seniales.push(`publicada hace ${oferta.antiguedad_horas}hs`);\n    if (oferta.postulacion_rapida === true) seniales.push('postulación rápida disponible');\n    const competenciaBaja = seniales.length > 0;\n\n    if (coincidenciaReal && competenciaBaja) {\n      estado = 'POSTULAR YA';\n      motivo = `Stack coincide (${coincidencias} tecnologías) y competencia baja: ${seniales.join(', ')}.`;\n    } else if (!coincidenciaReal) {\n      estado = 'MIRAR';\n      motivo = `Stack no coincide lo suficiente (${coincidencias}/${MIN_COINCIDENCIAS_STACK} tecnologías).`;\n    } else {\n      estado = 'MIRAR';\n      motivo = 'Sin datos de competencia — incierto, no se asume baja competencia.';\n    }\n  }\n}\n\nreturn { json: { ...oferta, dedup_key: dedupKey, estado, motivo, stack_join: (oferta.stack || []).join(', ') } };"
       }
     },
     {
@@ -273,74 +273,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "parameters": {
         "width": 480,
-        "height": 320,
-        "content": "## Antes de importar\n\n1. Reemplazar `TU_SHEET_ID_AQUI` (2 nodos) con el ID real del Sheet — ver esquema_planilla.md\n2. Crear/seleccionar credenciales: Gmail OAuth2, Google Sheets OAuth2, Header Auth para Anthropic (header `x-api-key`, valor `={{ $env.ANTHROPIC_API_KEY }}`)\n3. Reemplazar `REEMPLAZAR@ejemplo.com` en \"Enviar mail resumen\"\n4. Ajustar el filtro Gmail (`label:radar-empleos`) a la label real de tus alertas\n5. \"Parsear ofertas\" separa por link de LinkedIn — es una asunción sin mail real, validar y ajustar\n\n6. Importar workflow_error.json y workflow_heartbeat.json, después pegar\n   el ID de workflow_error acá (Settings > Error Workflow) y en `settings.errorWorkflow`\n7. Crear tab \"Heartbeat\" en el mismo Sheet con headers: id, ultima_corrida"
-      }
-    },
-    {
-      "id": "actualizar-heartbeat",
-      "name": "Actualizar heartbeat",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        2000,
-        260
-      ],
-      "parameters": {
-        "operation": "appendOrUpdate",
-        "documentId": {
-          "mode": "id",
-          "value": "TU_SHEET_ID_AQUI"
-        },
-        "sheetName": {
-          "mode": "name",
-          "value": "Heartbeat"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "matchingColumns": [
-            "id"
-          ],
-          "value": {
-            "id": "rama_principal",
-            "ultima_corrida": "={{ $now.toISO() }}"
-          }
-        },
-        "options": {}
-      },
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "REEMPLAZAR",
-          "name": "Google Sheets Account"
-        }
-      }
-    },
-    {
-      "id": "leer-perfil-cv",
-      "name": "Leer perfil CV",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [
-        80,
-        480
-      ],
-      "parameters": {
-        "operation": "read",
-        "documentId": {
-          "mode": "id",
-          "value": "TU_SHEET_ID_AQUI"
-        },
-        "sheetName": {
-          "mode": "name",
-          "value": "Perfil"
-        },
-        "options": {}
-      },
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "REEMPLAZAR",
-          "name": "Google Sheets Account"
-        }
+        "height": 260,
+        "content": "## Antes de importar\n\n1. Reemplazar `TU_SHEET_ID_AQUI` (2 nodos) con el ID real del Sheet\n2. Credenciales: Gmail OAuth2, Google Sheets OAuth2, Header Auth para\n   Anthropic (header `x-api-key`, valor `={{ $env.ANTHROPIC_API_KEY }}`)\n3. Reemplazar `REEMPLAZAR@ejemplo.com` en \"Enviar mail resumen\"\n4. Ajustar el filtro Gmail (`label:radar-empleos`) a la label real\n5. \"Parsear ofertas\" separa por link de LinkedIn — validar con un mail real\n6. Si cambia el CV, editar `CANDIDATO_STACK` a mano en \"Aplicar reglas de decisión\""
       }
     }
   ],
@@ -355,11 +289,6 @@
           },
           {
             "node": "Leer ofertas ya vistas",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Leer perfil CV",
             "type": "main",
             "index": 0
           }
@@ -450,18 +379,12 @@
             "node": "Enviar mail resumen",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Actualizar heartbeat",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
     }
   },
   "settings": {
-    "executionOrder": "v1",
-    "errorWorkflow": "REEMPLAZAR_CON_ID_DE_workflow_error"
+    "executionOrder": "v1"
   }
 }
