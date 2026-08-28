@@ -29,6 +29,37 @@ const TERMINOS_EXCLUYEN_PERFIL = [
   'bootcamp', 'no bootcamp',
 ];
 
+// Estado explícito para "no se pudo extraer nada" — distinto de MIRAR
+// (MIRAR es "se extrajo bien pero no conviene todavía"; NO_PARSEABLE es
+// "no sabemos qué hay ahí, un humano tiene que mirar el mail").
+const ESTADO_NO_PARSEABLE = 'NO_PARSEABLE';
+
+// Dedup key única (nunca null) para ofertas que no se pudieron parsear —
+// si dos usaran la misma key (o null), el appendOrUpdate por dedup_key de
+// "Guardar en Sheet" pisaría una fila con la otra. sufijoUnico es param
+// para poder testear con un valor fijo; en producción (Code node del
+// workflow) siempre es Date.now().
+function generarDedupKeyError(link, sufijoUnico) {
+  const base = link || 'sin-link';
+  const sufijo = sufijoUnico !== undefined ? sufijoUnico : Date.now();
+  return `no_parseable::${base}::${sufijo}`;
+}
+
+/**
+ * Se llama cuando "Extraer datos con IA" agotó reintentos, o el modelo
+ * devolvió algo que no es JSON válido. La oferta va igual a la planilla,
+ * marcada para revisión manual — nunca desaparece en silencio.
+ * @param {string|null} link
+ * @param {number|string} [sufijoUnico] - para tests; default Date.now()
+ */
+function decidirError(link, sufijoUnico) {
+  return {
+    estado: ESTADO_NO_PARSEABLE,
+    motivo: 'El modelo no devolvió JSON válido (o la llamada falló tras reintentos) — revisar a mano.',
+    dedup_key: generarDedupKeyError(link, sufijoUnico),
+  };
+}
+
 function normalizarEmpresaPuesto(empresa, puesto) {
   const normalizar = (texto) =>
     (texto || '')
@@ -117,4 +148,12 @@ function decidir(oferta, contexto = {}) {
   return { estado: 'MIRAR', motivo: 'Sin datos de competencia (postulantes/antigüedad/postulación rápida) — incierto, no se asume baja competencia.' };
 }
 
-module.exports = { decidir, normalizarEmpresaPuesto, contarCoincidenciasStack, fraseExcluyePerfil };
+module.exports = {
+  decidir,
+  decidirError,
+  normalizarEmpresaPuesto,
+  contarCoincidenciasStack,
+  fraseExcluyePerfil,
+  generarDedupKeyError,
+  ESTADO_NO_PARSEABLE,
+};

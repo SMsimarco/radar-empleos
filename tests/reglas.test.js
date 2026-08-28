@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { decidir, normalizarEmpresaPuesto } = require('../reglas.js');
+const { decidir, decidirError, normalizarEmpresaPuesto } = require('../reglas.js');
 
 // Oferta base con todos los campos del esquema en null/vacío — cada test
 // pisa solo lo que necesita, así queda claro qué campo dispara la regla.
@@ -130,4 +130,22 @@ test('10. publicada hace poco (antiguedad_horas bajo) + stack ok -> POSTULAR YA'
   const { estado, motivo } = decidir(oferta);
   assert.equal(estado, 'POSTULAR YA');
   assert.match(motivo, /hace 2hs/i);
+});
+
+test('11. misma empresa, puesto distinto -> dedup_key distinta (no son duplicados)', () => {
+  const keyA = normalizarEmpresaPuesto('TechNova Solutions', 'Full Stack Developer');
+  const keyB = normalizarEmpresaPuesto('TechNova Solutions', 'Backend Developer');
+  assert.notEqual(keyA, keyB);
+});
+
+test('12. respuesta del modelo inválida (JSON roto o llamada fallida tras reintentos) -> NO_PARSEABLE, nunca se pierde', () => {
+  const { estado, motivo, dedup_key } = decidirError('https://www.linkedin.com/comm/jobs/view/123', 'sufijo-fijo-test');
+  assert.equal(estado, 'NO_PARSEABLE');
+  assert.match(motivo, /no devolvió JSON válido/i);
+  assert.equal(dedup_key, 'no_parseable::https://www.linkedin.com/comm/jobs/view/123::sufijo-fijo-test');
+});
+
+test('13. respuesta inválida sin link -> dedup_key igual usa "sin-link", nunca null (no pisa otras filas en el Sheet)', () => {
+  const { dedup_key } = decidirError(null, 'sufijo-fijo-test');
+  assert.equal(dedup_key, 'no_parseable::sin-link::sufijo-fijo-test');
 });

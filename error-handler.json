@@ -1,0 +1,93 @@
+{
+  "name": "Radar de empleos — Error Handler",
+  "nodes": [
+    {
+      "typeVersion": 1,
+      "position": [-200, 200],
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "parameters": {}
+    },
+    {
+      "typeVersion": 2,
+      "position": [40, 200],
+      "id": "armar-alerta-error",
+      "name": "Armar alerta de error",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const data = $json;\nconst workflowName = (data.workflow && data.workflow.name) || 'desconocido';\nconst execId = data.execution && data.execution.id;\nconst nodoFallido = (data.execution && data.execution.lastNodeExecuted) || 'desconocido';\nconst errorMsg = (data.execution && data.execution.error && data.execution.error.message)\n  || JSON.stringify(data).slice(0, 500);\n\nreturn [{\n  json: {\n    asunto: `⚠️ Falló workflow: ${workflowName}`,\n    html: `<p><b>Workflow:</b> ${workflowName}</p>\n           <p><b>Nodo que falló:</b> ${nodoFallido}</p>\n           <p><b>Error:</b> ${errorMsg}</p>\n           <p><b>Ejecución:</b> ${execId || 'sin id'}</p>`,\n  },\n}];"
+      }
+    },
+    {
+      "typeVersion": 2.1,
+      "position": [280, 100],
+      "id": "enviar-alerta-mail",
+      "name": "Enviar alerta por mail",
+      "type": "n8n-nodes-base.gmail",
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "REEMPLAZAR@ejemplo.com",
+        "subject": "={{ $json.asunto }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REEMPLAZAR",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "typeVersion": 4.2,
+      "position": [280, 320],
+      "id": "avisar-fallo-healthchecks",
+      "name": "Avisar fallo a healthchecks.io",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "=https://hc-ping.com/TU_HEALTHCHECKS_UUID_AQUI/fail",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "typeVersion": 1,
+      "position": [-220, -140],
+      "id": "nota-setup-error",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "parameters": {
+        "width": 480,
+        "height": 220,
+        "content": "## Qué es esto\n\nWorkflow separado, se dispara solo cuando \"Radar de empleos\" (u otro\nworkflow que lo apunte) falla. No corre por cron.\n\n1. Credencial Gmail OAuth2 propia (puede ser la misma cuenta)\n2. Reemplazar `REEMPLAZAR@ejemplo.com`\n3. Mismo UUID de healthchecks.io que en el workflow principal\n4. Después de importar: copiar el Workflow ID (URL del workflow acá\n   arriba) y pegarlo en \"Radar de empleos\" → Settings → Error Workflow"
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          { "node": "Armar alerta de error", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Armar alerta de error": {
+      "main": [
+        [
+          { "node": "Enviar alerta por mail", "type": "main", "index": 0 },
+          { "node": "Avisar fallo a healthchecks.io", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
