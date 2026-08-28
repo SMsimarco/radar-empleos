@@ -274,7 +274,7 @@
       "parameters": {
         "width": 480,
         "height": 260,
-        "content": "## Antes de importar\n\n1. Reemplazar `TU_SHEET_ID_AQUI` (2 nodos) con el ID real del Sheet\n2. Credenciales: Gmail OAuth2, Google Sheets OAuth2, Header Auth para\n   Anthropic (header `x-api-key`, valor `={{ $env.ANTHROPIC_API_KEY }}`)\n3. Reemplazar `REEMPLAZAR@ejemplo.com` en \"Enviar mail resumen\"\n4. Ajustar el filtro Gmail (`label:radar-empleos`) a la label real\n5. \"Parsear ofertas\" separa por link de LinkedIn — validar con un mail real\n6. Si cambia el CV, editar `CANDIDATO_STACK` a mano en \"Aplicar reglas de decisión\""
+        "content": "## Antes de importar\n\n1. Credenciales: Gmail OAuth2, Google Sheets OAuth2, Header Auth para\n   Anthropic (header `x-api-key`, valor `={{ $env.ANTHROPIC_API_KEY }}`)\n2. Reemplazar `REEMPLAZAR@ejemplo.com` en \"Enviar mail resumen\"\n3. Ajustar/sacar el filtro Gmail (`label:radar-empleos`) en \"Leer alertas Gmail\"\n4. \"Parsear ofertas\" separa por link de LinkedIn — validar con un mail real\n5. Si cambia el CV, editar `CANDIDATO_STACK` a mano en \"Aplicar reglas de decisión\""
       }
     }
   ],
