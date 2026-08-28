@@ -1,10 +1,14 @@
 # Radar de empleos
 
-Un workflow n8n que lee tus alertas de empleo de Gmail, extrae los hechos
-de cada oferta con Claude, y decide con reglas de código si te conviene
-postular ya, mirar, o descartar — y te lo manda resumido por mail. No se
-postula solo. No scrapea LinkedIn: solo lee los mails de alerta que vos
-ya configuraste.
+Un workflow n8n que lee tus alertas de empleo de Gmail (LinkedIn, Indeed,
+Computrabajo, Bumeran), extrae los hechos de cada oferta con Claude, y
+decide con reglas de código si te conviene postular ya, mirar, o
+descartar — y te lo manda resumido por mail. Además hace seguimiento de
+lo que ya postulaste: borrador de mail a los 7 días sin respuesta, marca
+"fría" a los 14, y avisos por Telegram antes de una entrevista o prueba
+técnica con fecha límite. No se postula solo, no manda mails solo (todo
+lo que "envía" en tu nombre queda como borrador). No scrapea ningún
+sitio: solo lee los mails de alerta que vos ya configuraste en cada uno.
 
 ## Qué hace
 
@@ -12,7 +16,7 @@ ya configuraste.
 flowchart TD
     A[Cron diario] --> B[Leer alertas Gmail]
     A --> C[Leer ofertas ya vistas<br/>Sheet]
-    B --> D[Parsear ofertas<br/>split por link LinkedIn]
+    B --> D[Parsear ofertas<br/>dispatcher por remitente]
     D --> T[Aplicar tope de seguridad<br/>MAX_OFERTAS_POR_CORRIDA]
     T --> E[Preparar prompt IA]
     E --> F[Extraer datos con IA<br/>Claude Haiku, retry+timeout]
@@ -25,6 +29,42 @@ flowchart TD
     I --> J[Armar mail resumen]
     J --> K[Enviar mail resumen]
     K --> L[Avisar latido OK<br/>healthchecks.io]
+```
+
+`Parsear ofertas` distingue la fuente por remitente y usa un separador de
+ofertas distinto para cada una — ver el comentario del Code node para el
+detalle y las asunciones sin validar todavía (Bumeran especialmente).
+
+**Rama de seguimiento** (cuelga del mismo Cron diario, corre después de
+"Leer ofertas ya vistas"): sobre las filas con `postulado = true`, calcula
+qué avisos corresponden hoy con una función pura testeada
+(`seguimiento.js`, mirror en el Code node "Calcular seguimiento") y las
+enruta a 4 ramas por Code nodes de filtro — nunca con Switch/IF de n8n,
+mismo estilo que el resto del workflow:
+
+```mermaid
+flowchart TD
+    S[Calcular seguimiento] --> F7[Filtrar: borrador 7d]
+    S --> F14[Filtrar: fría 14d]
+    S --> FI[Filtrar: incompleta]
+    S --> FD[Filtrar: dry-run]
+
+    F7 --> P7[Preparar prompt draft] --> H7[Generar borrador con IA] --> A7[Armar draft Gmail] --> G7[Crear borrador seguimiento] --> M7[Marcar aviso 7d enviado] --> N7[Avisar borrador creado]
+    F14 --> M14[Marcar fría] --> N14[Avisar fría]
+    FI --> MI[Marcar incompleta] --> NI[Avisar incompleta]
+    FD --> ID[Imprimir dry-run] --> ND[Fin dry-run]
+```
+
+**Rama de deadlines** (72h/24h/6h antes de una obligación con
+`fecha_limite`): tiene su **propio Schedule Trigger horario**, separado
+del Cron diario de 8am — un chequeo una vez al día no puede detectar con
+precisión "faltan 6 horas". Mismo Sheet, mismo Telegram, mismo workflow:
+
+```mermaid
+flowchart TD
+    CH[Cron horario] --> LD[Leer ofertas para deadlines] --> CD[Calcular avisos deadline]
+    CD --> FDR[Filtrar: deadline real] --> TG[Avisar deadline<br/>Telegram] --> MD[Marcar aviso deadline enviado]
+    CD --> FDD[Filtrar: dry-run deadline] --> IDD[Imprimir dry-run deadline] --> NDD[Fin dry-run deadline]
 ```
 
 Workflow separado (`error-handler.json`), sin cron propio, disparado por
@@ -66,15 +106,35 @@ Todas se crean en n8n (Credentials), nunca hardcodeadas en el JSON:
 
 | Credencial | Tipo n8n | Para qué |
 |---|---|---|
-| Gmail | OAuth2 | leer alertas + mandar el mail resumen + mandar la alerta de error |
+| Gmail | OAuth2 | leer alertas + mandar mails (resumen, error, seguimiento) + crear borradores de seguimiento |
 | Google Sheets | OAuth2 | leer/escribir el Sheet de ofertas |
-| Anthropic | Header Auth (`x-api-key` = `={{ $env.ANTHROPIC_API_KEY }}`) | extracción con Claude Haiku |
+| Anthropic | Header Auth (`x-api-key` = `={{ $env.ANTHROPIC_API_KEY }}`) | extracción con Claude Haiku + redacción de borradores de seguimiento |
+| Telegram | Telegram API (bot token) | avisos de deadline (72h/24h/6h antes de una obligación) |
 
 `ANTHROPIC_API_KEY` va como variable de entorno del contenedor n8n en el
-Docker Compose del VPS, no en el JSON. La API key de Anthropic **nunca
-aparece en texto plano** en ninguno de los dos workflow JSON de este
-repo — solo hay una referencia a la credencial `httpHeaderAuth` por id
-interno de n8n (no sirve fuera de tu instancia).
+Docker Compose del VPS, no en el JSON. Ninguna API key **aparece en texto
+plano** en ninguno de los dos workflow JSON de este repo — solo hay
+referencias a credenciales por id interno de n8n (no sirven fuera de tu
+instancia).
+
+Variables de entorno adicionales para la rama de seguimiento (mismo
+Docker Compose, junto a `ANTHROPIC_API_KEY`):
+
+| Variable | Para qué |
+|---|---|
+| `TELEGRAM_CHAT_ID` | a qué chat le llegan los avisos de deadline |
+| `RADAR_SEGUIMIENTO_DRY_RUN` | `true` = calcula qué avisos mandaría (7d/14d/72h/24h/6h) y los imprime en el log de ejecución de n8n, sin crear borradores, sin mandar mails/Telegram, sin escribir en el Sheet. Dejar sin definir (o `false`) en producción |
+
+## Cómo crear el bot de Telegram
+
+1. Hablar con [@BotFather](https://t.me/BotFather) en Telegram, `/newbot`,
+   elegir nombre. Te da un token — va en la credencial n8n "Telegram
+   account" (tipo Telegram API), nunca en el JSON.
+2. Mandarle cualquier mensaje al bot nuevo (ej. "hola") para que tenga un
+   chat que leer.
+3. Abrir `https://api.telegram.org/bot<TOKEN>/getUpdates` en el navegador,
+   buscar `"chat":{"id": ...}` en la respuesta — ese número es
+   `TELEGRAM_CHAT_ID`.
 
 ## Resiliencia y costo
 
@@ -147,16 +207,29 @@ resolver a mano los 2 ejemplos de
 
 ## Qué NO detecta
 
-- **Nada que no venga en el mail de alerta.** No scrapea LinkedIn, no
+- **Nada que no venga en el mail de alerta.** No scrapea ningún sitio, no
   visita el link de la oferta. Si el mail no trae "postulantes" o
   "publicado hace X", esos campos quedan `null` para siempre en ese
   aviso — las reglas los tratan como incierto, no como poca competencia.
-- **El split de "Parsear ofertas" es una asunción sin validar contra un
-  mail real** — separa por links `/jobs/view/` de LinkedIn.
+- **El split de "Parsear ofertas" por Indeed/Computrabajo se validó
+  contra mails reales del 2026-08-28, pero los NOMBRES DE CAMPO exactos
+  que devuelve el nodo Gmail de n8n (`from`, `subject`, `textHtml`) son
+  una asunción sin confirmar en esta instancia** — revisar la primera
+  ejecución real. El de **Bumeran no está implementado**: cae a
+  `error_parseo_mail` a propósito (necesita el html del mail, no
+  disponible todavía) en vez de una fecha/estructura inventada.
+- **ZonaJobs no está sumado.** No tenía alerta configurada al momento de
+  escribir esto — agregar el remitente a "Leer alertas Gmail" y un caso
+  al dispatcher de "Parsear ofertas" cuando se configure.
 - **Coincidencia de stack es un conteo simple** (mínimo 2 tecnologías de
   `CANDIDATO_STACK` en el texto), no análisis semántico.
-- **No trackea nada después de guardarse en el Sheet.** Marcar `postulado`
-  es manual; no hay avisos de seguimiento de entrevistas.
+- **El seguimiento post-postulación es por día calendario, no por hora
+  exacta** — "7 días" se cuenta a medianoche UTC, no a la hora exacta en
+  que se cargó `fecha_postulacion`. Los avisos de deadline (72h/24h/6h) sí
+  son horarios, por eso tienen su propio cron cada 1 hora.
+- **Si `avisos_enviados` se edita a mano mal** (typo en el código, coma de
+  más) puede reenviar un aviso ya mandado o saltearse uno — es texto
+  libre, no hay validación de formato en el Sheet.
 - **El retry a Claude es de intervalo fijo, no exponencial de verdad**
   (ver sección "Resiliencia y costo"). Si Anthropic tiene una caída larga,
   el workflow igual va a agotar los 4 intentos rápido y esas ofertas caen
