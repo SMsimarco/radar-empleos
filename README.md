@@ -38,22 +38,25 @@ detalle y las asunciones sin validar todavía (Bumeran especialmente).
 **Rama de seguimiento** (cuelga del mismo Cron diario, corre después de
 "Leer ofertas ya vistas"): sobre las filas con `postulado = true`, calcula
 qué avisos corresponden hoy con una función pura testeada
-(`seguimiento.js`, mirror en el Code node "Calcular seguimiento") y las
-enruta a 4 ramas por Code nodes de filtro — nunca con Switch/IF de n8n,
-mismo estilo que el resto del workflow:
+(`seguimiento.js`, mirror en el Code node "Calcular seguimiento") y un
+nodo **Switch nativo de n8n** enruta por el campo `accion` — sin Code
+nodes de filtro duplicados. El modo dry-run no usa nodos de log: renombra
+`accion` a `reporte_dry_run`, el Switch no tiene regla para ese valor y
+`fallbackOutput: none` lo descarta solo (para ver qué hubiera pasado, se
+mira el output de "Calcular seguimiento" en el panel de ejecución de n8n,
+que conserva `accion_real`):
 
 ```mermaid
 flowchart TD
-    S[Calcular seguimiento] --> F7[Filtrar: borrador 7d]
-    S --> F14[Filtrar: fría 14d]
-    S --> FI[Filtrar: incompleta]
-    S --> FD[Filtrar: dry-run]
-
-    F7 --> P7[Preparar prompt draft] --> H7[Generar borrador con IA] --> A7[Armar draft Gmail] --> G7[Crear borrador seguimiento] --> M7[Marcar aviso 7d enviado] --> N7[Avisar borrador creado]
-    F14 --> M14[Marcar fría] --> N14[Avisar fría]
-    FI --> MI[Marcar incompleta] --> NI[Avisar incompleta]
-    FD --> ID[Imprimir dry-run] --> ND[Fin dry-run]
+    S[Calcular seguimiento] --> SW{Enrutar seguimiento<br/>Switch}
+    SW -->|borrador_7d| P7[Preparar prompt draft] --> H7[Generar borrador con IA] --> A7[Armar draft Gmail] --> G7[Crear borrador seguimiento] --> M7[Marcar aviso 7d enviado]
+    SW -->|fría_o_incompleta| M14[Marcar fría o incompleta<br/>1 solo Sheets node] --> N14[Avisar fría o incompleta<br/>1 solo Gmail, texto por expresión]
 ```
+
+"Marcar fría o incompleta" es un único nodo Sheets para las 2 acciones:
+la columna que no le corresponde a esa fila se reescribe con el mismo
+valor que ya tenía (`estado_actual`/`incompleta_actual`, no-op real) en
+vez de dejarla en blanco.
 
 **Rama de deadlines** (72h/24h/6h antes de una obligación con
 `fecha_limite`): tiene su **propio Schedule Trigger horario**, separado
@@ -63,8 +66,7 @@ precisión "faltan 6 horas". Mismo Sheet, mismo Telegram, mismo workflow:
 ```mermaid
 flowchart TD
     CH[Cron horario] --> LD[Leer ofertas para deadlines] --> CD[Calcular avisos deadline]
-    CD --> FDR[Filtrar: deadline real] --> TG[Avisar deadline<br/>Telegram] --> MD[Marcar aviso deadline enviado]
-    CD --> FDD[Filtrar: dry-run deadline] --> IDD[Imprimir dry-run deadline] --> NDD[Fin dry-run deadline]
+    CD --> FDR[Filtrar: deadline real<br/>Filter nativo] --> TG[Avisar deadline<br/>Telegram] --> MD[Marcar aviso deadline enviado]
 ```
 
 Workflow separado (`error-handler.json`), sin cron propio, disparado por

@@ -331,8 +331,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "parameters": {
         "width": 640,
-        "height": 620,
-        "content": "## Antes de importar\n\n1. Credenciales: Gmail OAuth2, Google Sheets OAuth2, Header Auth para\n   Anthropic (header `x-api-key`, valor `={{ $env.ANTHROPIC_API_KEY }}`),\n   Telegram API (bot token de BotFather) — ver README \"Cómo crear el bot\n   de Telegram\"\n2. Reemplazar `TU_SHEET_ID_AQUI` en los 7 nodos de Google Sheets — mismo\n   documento en todos, o la deduplicación y el seguimiento no encuentran nada\n3. Reemplazar el mail de destino en los 4 nodos Gmail que mandan mail\n   (\"Enviar mail resumen\", \"Avisar borrador creado\", \"Avisar fría\",\n   \"Avisar incompleta\")\n4. Agregar a la planilla \"Ofertas\" las columnas nuevas ANTES de activar:\n   `fuente`, `fecha_postulacion`, `fecha_limite`, `tipo_obligacion`,\n   `avisos_enviados`, `incompleta` — detalle en esquema_planilla.md\n5. Variables de entorno nuevas en el Docker Compose (junto a\n   ANTHROPIC_API_KEY): `TELEGRAM_CHAT_ID`, `RADAR_SEGUIMIENTO_DRY_RUN`\n   (poné esta última en `true` la primera semana para ver qué haría sin\n   que escriba ni mande nada — mirá el log de ejecución de \"Calcular\n   seguimiento\" / \"Calcular avisos deadline\")\n6. Reemplazar la credencial Telegram (\"REEMPLAZAR_TELEGRAM\") en \"Avisar\n   deadline\" por la real\n7. \"Parsear ofertas\" tiene un dispatcher por remitente (LinkedIn, Indeed,\n   Computrabajo validados contra mails reales; Bumeran cae a revisión\n   manual a propósito, ZonaJobs no está sumado) — leer el comentario del\n   Code node antes de confiar en los resultados de la primera corrida\n8. Si cambia el CV, editar `CANDIDATO_STACK` a mano en \"Aplicar reglas de\n   decisión\" (y en reglas.js)\n9. Tope de ofertas por corrida: `MAX_OFERTAS_POR_CORRIDA` en \"Aplicar tope\n   de seguridad\" (default 30)\n10. Crear check en healthchecks.io (período 24hs, gracia 2hs), pegar el\n    UUID en \"Avisar latido OK\" acá y en \"Avisar fallo\" del error-handler.json\n11. Importar error-handler.json aparte, poner tu mail ahí, copiar su\n    Workflow ID, pegarlo en Settings → Error Workflow de este workflow\n12. Activar AMBOS triggers: \"Cron diario\" (8am, sourcing + seguimiento\n    7d/14d) y \"Cron horario (deadlines)\" (cada 1hs, avisos 72h/24h/6h) —\n    si solo activás el primero, los avisos de deadline no van a correr"
+        "height": 760,
+        "content": "## ⚠️ Bug urgente encontrado (no es de esta actualización)\n\n\"Leer ofertas ya vistas\" falló en la corrida real del 28/8 9am con\n\"Requested entity was not found\" de Google Sheets — la credencial\n\"Google Sheets account\" no está viendo el Sheet `TU_SHEET_ID_AQUI`.\nRevisar: ¿la cuenta de Google conectada en esa credencial es la dueña\n(o tiene acceso) al Sheet? Sin arreglar esto el workflow entero no\nprocesa nada, viene fallando desde antes de esta actualización.\n\n## Antes de importar\n\n1. Credenciales: Gmail OAuth2, Google Sheets OAuth2, Header Auth para\n   Anthropic (header `x-api-key`, valor `={{ $env.ANTHROPIC_API_KEY }}`\n   — esto sí funciona, los credenciales no están afectados por el bloqueo\n   de $env de abajo), Telegram API (bot token de BotFather)\n2. Reemplazar `TU_SHEET_ID_AQUI` en los 6 nodos de Google Sheets — mismo\n   documento en todos, o la deduplicación y el seguimiento no encuentran nada\n3. Reemplazar el mail de destino en los 2 nodos Gmail que mandan mail\n   (\"Enviar mail resumen\", \"Avisar fría o incompleta\")\n4. Agregar a la planilla \"Ofertas\" las columnas nuevas ANTES de activar:\n   `fuente`, `fecha_postulacion`, `fecha_limite`, `tipo_obligacion`,\n   `avisos_enviados`, `incompleta` — detalle en esquema_planilla.md\n5. Esta instancia de n8n bloquea `$env` dentro de Code nodes (\"access to\n   env vars denied\", confirmado en ejecución real) — por eso DRY_RUN es\n   una constante hardcodeada (`const DRY_RUN = true`) en \"Calcular\n   seguimiento\" y \"Calcular avisos deadline\", y el chat_id de Telegram\n   (`8372620827`) está literal en \"Avisar deadline\". Para desactivar el\n   dry-run: cambiar `DRY_RUN = true` a `false` a mano en esos 2 Code\n   nodes (mantenerlos sincronizados) y reimportar\n6. Reemplazar la credencial Telegram (\"REEMPLAZAR_TELEGRAM\") en \"Avisar\n   deadline\" por la real\n7. \"Parsear ofertas\" tiene un dispatcher por remitente (LinkedIn, Indeed,\n   Computrabajo validados contra mails reales; Bumeran cae a revisión\n   manual a propósito, ZonaJobs no está sumado) — leer el comentario del\n   Code node antes de confiar en los resultados de la primera corrida\n8. Si cambia el CV, editar `CANDIDATO_STACK` a mano en \"Aplicar reglas de\n   decisión\" (y en reglas.js)\n9. Tope de ofertas por corrida: `MAX_OFERTAS_POR_CORRIDA` en \"Aplicar tope\n   de seguridad\" (default 30)\n10. Crear check en healthchecks.io (período 24hs, gracia 2hs), pegar el\n    UUID en \"Avisar latido OK\" acá y en \"Avisar fallo\" del error-handler.json\n11. Importar error-handler.json aparte, poner tu mail ahí, copiar su\n    Workflow ID, pegarlo en Settings → Error Workflow de este workflow\n12. Activar AMBOS triggers: \"Cron diario\" (8am, sourcing + seguimiento\n    7d/14d) y \"Cron horario (deadlines)\" (cada 1hs, avisos 72h/24h/6h) —\n    si solo activás el primero, los avisos de deadline no van a correr"
       }
     },
     {
@@ -347,29 +347,84 @@
       "onError": "continueRegularOutput",
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Mirror de seguimiento.js — si cambiás una regla, cambiala ahí primero,\n// corré `node --test tests/`, después pegala acá.\nconst DIAS_AVISO_SEGUIMIENTO = 7;\nconst DIAS_MARCAR_FRIA = 14;\n\nfunction parseAvisos(avisosEnviados) {\n  return (avisosEnviados || '').split(',').map((c) => c.trim()).filter(Boolean);\n}\n\nfunction diffDiasCalendario(hoy, fechaPostulacionISO) {\n  const inicioHoy = Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate());\n  const [anio, mes, dia] = fechaPostulacionISO.split('-').map(Number);\n  const inicioFecha = Date.UTC(anio, mes - 1, dia);\n  return Math.round((inicioHoy - inicioFecha) / 86400000);\n}\n\nfunction calcularAvisosPostulacion(fila, hoy) {\n  const avisos = parseAvisos(fila.avisos_enviados);\n  if (!fila.fecha_postulacion) {\n    // Regla dura: nunca asumir \"hoy\" si falta la fecha.\n    return { incompleta: true, acciones: avisos.includes('incompleta') ? [] : ['aviso_incompleta'] };\n  }\n  const dias = diffDiasCalendario(hoy, fila.fecha_postulacion);\n  const acciones = [];\n  if (dias >= DIAS_AVISO_SEGUIMIENTO && !avisos.includes('7d')) acciones.push('draft_seguimiento_7d');\n  if (dias >= DIAS_MARCAR_FRIA && !avisos.includes('14d')) acciones.push('marcar_fria_14d');\n  return { incompleta: false, acciones };\n}\n\n// DRY_RUN: activar con env RADAR_SEGUIMIENTO_DRY_RUN=true en el Docker\n// Compose del VPS. Con esto en true, ninguna rama de escritura real\n// recibe items (todas quedan en 0 items, n8n no las ejecuta) — todo se\n// redirige a \"Filtrar: dry-run\" -> \"Imprimir dry-run\", que solo loguea.\nconst DRY_RUN = String($env.RADAR_SEGUIMIENTO_DRY_RUN || '').toLowerCase() === 'true';\nconst hoy = new Date();\n\nconst filas = $('Leer ofertas ya vistas').all()\n  .map((i) => i.json)\n  .filter((f) => String(f.postulado).toLowerCase() === 'true');\n\nconst candidatos = [];\nfor (const fila of filas) {\n  const { acciones } = calcularAvisosPostulacion(fila, hoy);\n  for (const accion of acciones) {\n    candidatos.push({\n      accion,\n      dedup_key: fila.dedup_key,\n      empresa: fila.empresa,\n      puesto: fila.puesto,\n      link: fila.link,\n      fecha_postulacion: fila.fecha_postulacion,\n      avisos_enviados: fila.avisos_enviados || '',\n    });\n  }\n}\n\nif (DRY_RUN) {\n  return candidatos.map((c) => ({ json: { ...c, accion_real: c.accion, accion: 'reporte_dry_run' } }));\n}\nreturn candidatos.map((c) => ({ json: c }));"
+        "jsCode": "// Mirror de seguimiento.js — si cambiás una regla, cambiala ahí primero,\n// corré node --test tests/, después pegala acá.\nconst DIAS_AVISO_SEGUIMIENTO = 7;\nconst DIAS_MARCAR_FRIA = 14;\n\nfunction parseAvisos(avisosEnviados) {\n  return (avisosEnviados || '').split(',').map((c) => c.trim()).filter(Boolean);\n}\n\nfunction diffDiasCalendario(hoy, fechaPostulacionISO) {\n  const inicioHoy = Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate());\n  const [anio, mes, dia] = fechaPostulacionISO.split('-').map(Number);\n  const inicioFecha = Date.UTC(anio, mes - 1, dia);\n  return Math.round((inicioHoy - inicioFecha) / 86400000);\n}\n\nfunction calcularAvisosPostulacion(fila, hoy) {\n  const avisos = parseAvisos(fila.avisos_enviados);\n  if (!fila.fecha_postulacion) {\n    return { incompleta: true, acciones: avisos.includes('incompleta') ? [] : ['aviso_incompleta'] };\n  }\n  const dias = diffDiasCalendario(hoy, fila.fecha_postulacion);\n  const acciones = [];\n  if (dias >= DIAS_AVISO_SEGUIMIENTO && !avisos.includes('7d')) acciones.push('draft_seguimiento_7d');\n  if (dias >= DIAS_MARCAR_FRIA && !avisos.includes('14d')) acciones.push('marcar_fria_14d');\n  return { incompleta: false, acciones };\n}\n\n// DRY_RUN: esta instancia de n8n bloquea el acceso a $env desde Code\n// nodes (\"access to env vars denied\", confirmado en ejecución real) — por\n// eso es una constante hardcodeada, no una env var. Cambiar a mano acá\n// (y en \"Calcular avisos deadline\") cuando quieras activar/desactivar.\n// Con DRY_RUN=true se renombra accion -> 'reporte_dry_run' antes de\n// salir: el Switch de abajo no tiene regla para ese valor y\n// fallbackOutput=none lo descarta solo. Para ver qué hubiera pasado,\n// mirá el output de ESTE nodo en el panel de ejecución (queda\n// accion_real con la acción real).\nconst DRY_RUN = true;\nconst hoy = new Date();\n\nconst filas = $('Leer ofertas ya vistas').all()\n  .map((i) => i.json)\n  .filter((f) => String(f.postulado).toLowerCase() === 'true');\n\nconst candidatos = [];\nfor (const fila of filas) {\n  const { acciones } = calcularAvisosPostulacion(fila, hoy);\n  for (const accion of acciones) {\n    candidatos.push({\n      accion,\n      dedup_key: fila.dedup_key,\n      empresa: fila.empresa,\n      puesto: fila.puesto,\n      link: fila.link,\n      fecha_postulacion: fila.fecha_postulacion,\n      avisos_enviados: fila.avisos_enviados || '',\n      // Se pasan sin tocar para que \"Marcar fría o incompleta\" pueda\n      // reescribir el mismo valor en la columna que no le corresponde a\n      // esta acción (no-op real, nunca blanquea la otra columna).\n      estado_actual: fila.estado || '',\n      incompleta_actual: fila.incompleta || '',\n    });\n  }\n}\n\nif (DRY_RUN) {\n  return candidatos.map((c) => ({ json: { ...c, accion_real: c.accion, accion: 'reporte_dry_run' } }));\n}\nreturn candidatos.map((c) => ({ json: c }));"
       }
     },
     {
-      "typeVersion": 2,
+      "typeVersion": 3.4,
       "position": [
-        340,
-        400
+        320,
+        620
       ],
-      "id": "filtrar-borrador-7d",
-      "name": "Filtrar: borrador 7d",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
+      "id": "enrutar-seguimiento",
+      "name": "Enrutar seguimiento",
+      "type": "n8n-nodes-base.switch",
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "return $input.all().filter((i) => i.json.accion === \"draft_seguimiento_7d\");"
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "draft_seguimiento_7d",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "borrador_7d"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "marcar_fria_14d",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "leftValue": "={{ $json.accion }}",
+                    "rightValue": "aviso_incompleta",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "or"
+              },
+              "renameOutput": true,
+              "outputKey": "fria_o_incompleta"
+            }
+          ]
+        },
+        "options": {}
       }
     },
     {
       "typeVersion": 2,
       "position": [
         580,
-        400
+        460
       ],
       "id": "preparar-prompt-draft",
       "name": "Preparar prompt draft seguimiento",
@@ -384,7 +439,7 @@
       "typeVersion": 4.2,
       "position": [
         820,
-        400
+        460
       ],
       "id": "generar-borrador-ia",
       "name": "Generar borrador con IA",
@@ -429,7 +484,7 @@
       "typeVersion": 2,
       "position": [
         1060,
-        400
+        460
       ],
       "id": "armar-draft-gmail",
       "name": "Armar draft Gmail",
@@ -444,7 +499,7 @@
       "typeVersion": 2.1,
       "position": [
         1300,
-        400
+        460
       ],
       "id": "crear-borrador-seguimiento",
       "name": "Crear borrador seguimiento",
@@ -468,7 +523,7 @@
       "typeVersion": 4.5,
       "position": [
         1540,
-        400
+        460
       ],
       "id": "marcar-aviso-7d",
       "name": "Marcar aviso 7d enviado",
@@ -503,68 +558,13 @@
       }
     },
     {
-      "typeVersion": 2,
-      "position": [
-        1780,
-        400
-      ],
-      "id": "armar-mail-borrador",
-      "name": "Armar mail aviso borrador",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "return {\n  json: {\n    asunto: `📨 Nuevo borrador de seguimiento — ${$json.puesto} en ${$json.empresa}`,\n    html: `<p>Se creó un borrador de seguimiento para <b>${$json.puesto}</b> en <b>${$json.empresa}</b>.</p><p>Revisalo en Gmail → Borradores antes de mandarlo.</p>${$json.link ? `<p><a href=\"${$json.link}\">Ver oferta original</a></p>` : ''}`,\n  },\n};"
-      }
-    },
-    {
-      "typeVersion": 2.1,
-      "position": [
-        2020,
-        400
-      ],
-      "id": "avisar-borrador-creado",
-      "name": "Avisar borrador creado",
-      "type": "n8n-nodes-base.gmail",
-      "parameters": {
-        "resource": "message",
-        "operation": "send",
-        "sendTo": "ssimonmarconi@gmail.com",
-        "subject": "={{ $json.asunto }}",
-        "emailType": "html",
-        "message": "={{ $json.html }}",
-        "options": {}
-      },
-      "credentials": {
-        "gmailOAuth2": {
-          "id": "REEMPLAZAR",
-          "name": "Gmail account"
-        }
-      }
-    },
-    {
-      "typeVersion": 2,
-      "position": [
-        340,
-        620
-      ],
-      "id": "filtrar-fria-14d",
-      "name": "Filtrar: fría 14d",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "return $input.all().filter((i) => i.json.accion === \"marcar_fria_14d\");"
-      }
-    },
-    {
       "typeVersion": 4.5,
       "position": [
         580,
-        620
+        780
       ],
-      "id": "marcar-fria",
-      "name": "Marcar fría",
+      "id": "marcar-fria-o-incompleta",
+      "name": "Marcar fría o incompleta",
       "type": "n8n-nodes-base.googleSheets",
       "parameters": {
         "operation": "appendOrUpdate",
@@ -583,8 +583,9 @@
           ],
           "value": {
             "dedup_key": "={{ $json.dedup_key }}",
-            "estado": "FRÍA",
-            "avisos_enviados": "={{ ($json.avisos_enviados ? $json.avisos_enviados + ',' : '') + '14d' }}"
+            "estado": "={{ $json.accion === 'marcar_fria_14d' ? 'FRÍA' : $json.estado_actual }}",
+            "incompleta": "={{ $json.accion === 'aviso_incompleta' ? 'true' : $json.incompleta_actual }}",
+            "avisos_enviados": "={{ ($json.avisos_enviados ? $json.avisos_enviados + ',' : '') + ($json.accion === 'marcar_fria_14d' ? '14d' : 'incompleta') }}"
           }
         },
         "options": {}
@@ -597,36 +598,21 @@
       }
     },
     {
-      "typeVersion": 2,
-      "position": [
-        820,
-        620
-      ],
-      "id": "armar-mail-fria",
-      "name": "Armar mail fría",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "return {\n  json: {\n    asunto: `🥶 Se enfrió: ${$json.puesto} en ${$json.empresa}`,\n    html: `<p>Pasaron 14 días sin respuesta de <b>${$json.empresa}</b> para <b>${$json.puesto}</b>. Se marcó como FRÍA en la planilla.</p>`,\n  },\n};"
-      }
-    },
-    {
       "typeVersion": 2.1,
       "position": [
-        1060,
-        620
+        820,
+        780
       ],
-      "id": "avisar-fria",
-      "name": "Avisar fría",
+      "id": "avisar-fria-o-incompleta",
+      "name": "Avisar fría o incompleta",
       "type": "n8n-nodes-base.gmail",
       "parameters": {
         "resource": "message",
         "operation": "send",
         "sendTo": "ssimonmarconi@gmail.com",
-        "subject": "={{ $json.asunto }}",
+        "subject": "={{ $json.accion === 'marcar_fria_14d' ? ('🥶 Se enfrió: ' + $json.puesto + ' en ' + $json.empresa) : ('⚠️ Falta fecha de postulación — ' + ($json.puesto || '(sin puesto)') + ' en ' + ($json.empresa || '(sin empresa)')) }}",
         "emailType": "html",
-        "message": "={{ $json.html }}",
+        "message": "={{ $json.accion === 'marcar_fria_14d' ? ('<p>Pasaron 14 días sin respuesta de <b>' + $json.empresa + '</b> para <b>' + $json.puesto + '</b>. Se marcó como FRÍA en la planilla.</p>') : ('<p>Esta fila tiene <code>postulado = true</code> pero no tiene <code>fecha_postulacion</code> cargada, así que el seguimiento (7d/14d) no puede calcularse.</p><p>Completá la fecha a mano en la planilla (dedup_key: <code>' + $json.dedup_key + '</code>).</p>') }}",
         "options": {}
       },
       "credentials": {
@@ -635,147 +621,12 @@
           "name": "Gmail account"
         }
       }
-    },
-    {
-      "typeVersion": 2,
-      "position": [
-        340,
-        840
-      ],
-      "id": "filtrar-incompleta",
-      "name": "Filtrar: incompleta",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "return $input.all().filter((i) => i.json.accion === \"aviso_incompleta\");"
-      }
-    },
-    {
-      "typeVersion": 4.5,
-      "position": [
-        580,
-        840
-      ],
-      "id": "marcar-incompleta",
-      "name": "Marcar incompleta",
-      "type": "n8n-nodes-base.googleSheets",
-      "parameters": {
-        "operation": "appendOrUpdate",
-        "documentId": {
-          "mode": "id",
-          "value": "TU_SHEET_ID_AQUI"
-        },
-        "sheetName": {
-          "mode": "name",
-          "value": "Ofertas"
-        },
-        "columns": {
-          "mappingMode": "defineBelow",
-          "matchingColumns": [
-            "dedup_key"
-          ],
-          "value": {
-            "dedup_key": "={{ $json.dedup_key }}",
-            "incompleta": "true",
-            "avisos_enviados": "={{ ($json.avisos_enviados ? $json.avisos_enviados + ',' : '') + 'incompleta' }}"
-          }
-        },
-        "options": {}
-      },
-      "credentials": {
-        "googleSheetsOAuth2Api": {
-          "id": "REEMPLAZAR",
-          "name": "Google Sheets Account"
-        }
-      }
-    },
-    {
-      "typeVersion": 2,
-      "position": [
-        820,
-        840
-      ],
-      "id": "armar-mail-incompleta",
-      "name": "Armar mail incompleta",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "return {\n  json: {\n    asunto: `⚠️ Falta fecha de postulación — ${$json.puesto || '(sin puesto)'} en ${$json.empresa || '(sin empresa)'}`,\n    html: `<p>Esta fila tiene <code>postulado = true</code> pero no tiene <code>fecha_postulacion</code> cargada, así que el seguimiento (7d/14d) no puede calcularse.</p><p>Completá la fecha a mano en la planilla (dedup_key: <code>${$json.dedup_key}</code>).</p>`,\n  },\n};"
-      }
-    },
-    {
-      "typeVersion": 2.1,
-      "position": [
-        1060,
-        840
-      ],
-      "id": "avisar-incompleta",
-      "name": "Avisar incompleta",
-      "type": "n8n-nodes-base.gmail",
-      "parameters": {
-        "resource": "message",
-        "operation": "send",
-        "sendTo": "ssimonmarconi@gmail.com",
-        "subject": "={{ $json.asunto }}",
-        "emailType": "html",
-        "message": "={{ $json.html }}",
-        "options": {}
-      },
-      "credentials": {
-        "gmailOAuth2": {
-          "id": "REEMPLAZAR",
-          "name": "Gmail account"
-        }
-      }
-    },
-    {
-      "typeVersion": 2,
-      "position": [
-        340,
-        1060
-      ],
-      "id": "filtrar-dry-run",
-      "name": "Filtrar: dry-run",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "return $input.all().filter((i) => i.json.accion === \"reporte_dry_run\");"
-      }
-    },
-    {
-      "typeVersion": 2,
-      "position": [
-        580,
-        1060
-      ],
-      "id": "imprimir-dry-run",
-      "name": "Imprimir dry-run",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const resumen = $input.all().map((i) => `- [${i.json.accion_real}] ${i.json.puesto || '(sin puesto)'} en ${i.json.empresa || '(sin empresa)'} (dedup_key: ${i.json.dedup_key})`).join('\\n');\nconsole.log(`[Radar de empleos — dry-run seguimiento] ${$input.all().length} acción(es) que se ejecutarían hoy:\\n${resumen}`);\nreturn $input.all();"
-      }
-    },
-    {
-      "typeVersion": 1,
-      "position": [
-        820,
-        1060
-      ],
-      "id": "fin-dry-run",
-      "name": "Fin dry-run",
-      "type": "n8n-nodes-base.noOp",
-      "parameters": {}
     },
     {
       "typeVersion": 1.2,
       "position": [
         -200,
-        1320
+        1040
       ],
       "id": "cron-horario-deadlines",
       "name": "Cron horario (deadlines)",
@@ -795,7 +646,7 @@
       "typeVersion": 4.5,
       "position": [
         80,
-        1320
+        1040
       ],
       "id": "leer-ofertas-deadlines",
       "name": "Leer ofertas para deadlines",
@@ -823,7 +674,7 @@
       "typeVersion": 2,
       "position": [
         320,
-        1320
+        1040
       ],
       "id": "calcular-avisos-deadline",
       "name": "Calcular avisos deadline",
@@ -831,29 +682,46 @@
       "onError": "continueRegularOutput",
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Mirror de seguimiento.js (calcularAvisosObligacion) — mismo criterio de\n// sincronización que el resto de las reglas: cambiar ahí primero.\nconst VENTANAS_OBLIGACION_HORAS = [72, 24, 6];\n\nfunction parseAvisos(avisosEnviados) {\n  return (avisosEnviados || '').split(',').map((c) => c.trim()).filter(Boolean);\n}\n\nfunction diffHoras(fechaLimiteISO, ahora) {\n  return (new Date(fechaLimiteISO).getTime() - ahora.getTime()) / 3600000;\n}\n\nconst DRY_RUN = String($env.RADAR_SEGUIMIENTO_DRY_RUN || '').toLowerCase() === 'true';\nconst ahora = new Date();\n\nconst filas = $input.all()\n  .map((i) => i.json)\n  .filter((f) => String(f.postulado).toLowerCase() === 'true' && f.fecha_limite);\n\nconst candidatos = [];\nfor (const fila of filas) {\n  const horasRestantes = diffHoras(fila.fecha_limite, ahora);\n  if (horasRestantes < 0) continue; // ya venció, no avisar de algo que ya pasó\n  const avisos = parseAvisos(fila.avisos_enviados);\n  for (const ventana of VENTANAS_OBLIGACION_HORAS) {\n    const codigo = `${ventana}h`;\n    if (horasRestantes <= ventana && !avisos.includes(codigo)) {\n      candidatos.push({\n        accion: `deadline_${codigo}`,\n        _codigo: codigo,\n        dedup_key: fila.dedup_key,\n        empresa: fila.empresa,\n        puesto: fila.puesto,\n        tipo_obligacion: fila.tipo_obligacion || 'obligación',\n        fecha_limite: fila.fecha_limite,\n        avisos_enviados: fila.avisos_enviados || '',\n        horas_restantes: Math.round(horasRestantes),\n      });\n    }\n  }\n}\n\nif (DRY_RUN) {\n  return candidatos.map((c) => ({ json: { ...c, accion_real: c.accion, accion: 'reporte_dry_run' } }));\n}\nreturn candidatos.map((c) => ({ json: c }));"
+        "jsCode": "// Mirror de seguimiento.js (calcularAvisosObligacion).\nconst VENTANAS_OBLIGACION_HORAS = [72, 24, 6];\n\nfunction parseAvisos(avisosEnviados) {\n  return (avisosEnviados || '').split(',').map((c) => c.trim()).filter(Boolean);\n}\nfunction diffHoras(fechaLimiteISO, ahora) {\n  return (new Date(fechaLimiteISO).getTime() - ahora.getTime()) / 3600000;\n}\n\n// Ver comentario largo en \"Calcular seguimiento\" — $env bloqueado acá,\n// constante hardcodeada, mantener sincronizada con la de ese nodo.\nconst DRY_RUN = true;\nconst ahora = new Date();\n\nconst filas = $input.all()\n  .map((i) => i.json)\n  .filter((f) => String(f.postulado).toLowerCase() === 'true' && f.fecha_limite);\n\nconst candidatos = [];\nfor (const fila of filas) {\n  const horasRestantes = diffHoras(fila.fecha_limite, ahora);\n  if (horasRestantes < 0) continue;\n  const avisos = parseAvisos(fila.avisos_enviados);\n  for (const ventana of VENTANAS_OBLIGACION_HORAS) {\n    const codigo = `${ventana}h`;\n    if (horasRestantes <= ventana && !avisos.includes(codigo)) {\n      candidatos.push({\n        accion: `deadline_${codigo}`,\n        _codigo: codigo,\n        dedup_key: fila.dedup_key,\n        empresa: fila.empresa,\n        puesto: fila.puesto,\n        tipo_obligacion: fila.tipo_obligacion || 'obligación',\n        fecha_limite: fila.fecha_limite,\n        avisos_enviados: fila.avisos_enviados || '',\n        horas_restantes: Math.round(horasRestantes),\n      });\n    }\n  }\n}\n\nif (DRY_RUN) {\n  return candidatos.map((c) => ({ json: { ...c, accion_real: c.accion, accion: 'reporte_dry_run' } }));\n}\nreturn candidatos.map((c) => ({ json: c }));"
       }
     },
     {
-      "typeVersion": 2,
+      "typeVersion": 2.3,
       "position": [
         560,
-        1200
+        1040
       ],
       "id": "filtrar-deadline-real",
       "name": "Filtrar: deadline real",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
+      "type": "n8n-nodes-base.filter",
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "return $input.all().filter((i) => typeof i.json.accion === 'string' && i.json.accion.startsWith('deadline_'));"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "reporte_dry_run",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false,
+        "options": {}
       }
     },
     {
       "typeVersion": 1.2,
       "position": [
         800,
-        1200
+        1040
       ],
       "id": "avisar-deadline",
       "name": "Avisar deadline",
@@ -862,7 +730,7 @@
       "parameters": {
         "resource": "message",
         "operation": "sendMessage",
-        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "chatId": "8372620827",
         "text": "={{ \"⏰ \" + $json.tipo_obligacion + \": \" + $json.puesto + \" en \" + $json.empresa + \" — faltan \" + $json.horas_restantes + \"hs\" }}",
         "additionalFields": {}
       },
@@ -877,7 +745,7 @@
       "typeVersion": 4.5,
       "position": [
         1040,
-        1200
+        1040
       ],
       "id": "marcar-aviso-deadline",
       "name": "Marcar aviso deadline enviado",
@@ -910,47 +778,6 @@
           "name": "Google Sheets Account"
         }
       }
-    },
-    {
-      "typeVersion": 2,
-      "position": [
-        560,
-        1440
-      ],
-      "id": "filtrar-dry-run-deadline",
-      "name": "Filtrar: dry-run deadline",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "return $input.all().filter((i) => i.json.accion === \"reporte_dry_run\");"
-      }
-    },
-    {
-      "typeVersion": 2,
-      "position": [
-        800,
-        1440
-      ],
-      "id": "imprimir-dry-run-deadline",
-      "name": "Imprimir dry-run deadline",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const resumen = $input.all().map((i) => `- [${i.json.accion_real}] ${i.json.puesto || '(sin puesto)'} en ${i.json.empresa || '(sin empresa)'} — faltan ${i.json.horas_restantes}hs (dedup_key: ${i.json.dedup_key})`).join('\\n');\nconsole.log(`[Radar de empleos — dry-run deadlines] ${$input.all().length} aviso(s) que se mandarían por Telegram ahora:\\n${resumen}`);\nreturn $input.all();"
-      }
-    },
-    {
-      "typeVersion": 1,
-      "position": [
-        1040,
-        1440
-      ],
-      "id": "fin-dry-run-deadline",
-      "name": "Fin dry-run deadline",
-      "type": "n8n-nodes-base.noOp",
-      "parameters": {}
     }
   ],
   "connections": {
@@ -1097,33 +924,25 @@
       "main": [
         [
           {
-            "node": "Filtrar: borrador 7d",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Filtrar: fría 14d",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Filtrar: incompleta",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Filtrar: dry-run",
+            "node": "Enrutar seguimiento",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Filtrar: borrador 7d": {
+    "Enrutar seguimiento": {
       "main": [
         [
           {
             "node": "Preparar prompt draft seguimiento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Marcar fría o incompleta",
             "type": "main",
             "index": 0
           }
@@ -1174,110 +993,11 @@
         ]
       ]
     },
-    "Marcar aviso 7d enviado": {
+    "Marcar fría o incompleta": {
       "main": [
         [
           {
-            "node": "Armar mail aviso borrador",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Armar mail aviso borrador": {
-      "main": [
-        [
-          {
-            "node": "Avisar borrador creado",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Filtrar: fría 14d": {
-      "main": [
-        [
-          {
-            "node": "Marcar fría",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Marcar fría": {
-      "main": [
-        [
-          {
-            "node": "Armar mail fría",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Armar mail fría": {
-      "main": [
-        [
-          {
-            "node": "Avisar fría",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Filtrar: incompleta": {
-      "main": [
-        [
-          {
-            "node": "Marcar incompleta",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Marcar incompleta": {
-      "main": [
-        [
-          {
-            "node": "Armar mail incompleta",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Armar mail incompleta": {
-      "main": [
-        [
-          {
-            "node": "Avisar incompleta",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Filtrar: dry-run": {
-      "main": [
-        [
-          {
-            "node": "Imprimir dry-run",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Imprimir dry-run": {
-      "main": [
-        [
-          {
-            "node": "Fin dry-run",
+            "node": "Avisar fría o incompleta",
             "type": "main",
             "index": 0
           }
@@ -1313,11 +1033,6 @@
             "node": "Filtrar: deadline real",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Filtrar: dry-run deadline",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
@@ -1338,28 +1053,6 @@
         [
           {
             "node": "Marcar aviso deadline enviado",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Filtrar: dry-run deadline": {
-      "main": [
-        [
-          {
-            "node": "Imprimir dry-run deadline",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Imprimir dry-run deadline": {
-      "main": [
-        [
-          {
-            "node": "Fin dry-run deadline",
             "type": "main",
             "index": 0
           }
