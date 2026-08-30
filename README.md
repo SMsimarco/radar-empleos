@@ -3,12 +3,9 @@
 Un workflow n8n que lee tus alertas de empleo de Gmail (LinkedIn, Indeed,
 Computrabajo, Bumeran), extrae los hechos de cada oferta con Claude, y
 decide con reglas de código si te conviene postular ya, mirar, o
-descartar — y te lo manda resumido por mail. Además hace seguimiento de
-lo que ya postulaste: borrador de mail a los 7 días sin respuesta, marca
-"fría" a los 14, y avisos por Telegram antes de una entrevista o prueba
-técnica con fecha límite. No se postula solo, no manda mails solo (todo
-lo que "envía" en tu nombre queda como borrador). No scrapea ningún
-sitio: solo lee los mails de alerta que vos ya configuraste en cada uno.
+descartar — y te lo manda resumido por mail. No se postula solo. No
+scrapea ningún sitio: solo lee los mails de alerta que vos ya
+configuraste en cada uno.
 
 ## Qué hace
 
@@ -35,40 +32,6 @@ flowchart TD
 ofertas distinto para cada una — ver el comentario del Code node para el
 detalle y las asunciones sin validar todavía (Bumeran especialmente).
 
-**Rama de seguimiento** (cuelga del mismo Cron diario, corre después de
-"Leer ofertas ya vistas"): sobre las filas con `postulado = true`, calcula
-qué avisos corresponden hoy con una función pura testeada
-(`seguimiento.js`, mirror en el Code node "Calcular seguimiento") y un
-nodo **Switch nativo de n8n** enruta por el campo `accion` — sin Code
-nodes de filtro duplicados. El modo dry-run no usa nodos de log: renombra
-`accion` a `reporte_dry_run`, el Switch no tiene regla para ese valor y
-`fallbackOutput: none` lo descarta solo (para ver qué hubiera pasado, se
-mira el output de "Calcular seguimiento" en el panel de ejecución de n8n,
-que conserva `accion_real`):
-
-```mermaid
-flowchart TD
-    S[Calcular seguimiento] --> SW{Enrutar seguimiento<br/>Switch}
-    SW -->|borrador_7d| P7[Preparar prompt draft] --> H7[Generar borrador con IA] --> A7[Armar draft Gmail] --> G7[Crear borrador seguimiento] --> M7[Marcar aviso 7d enviado]
-    SW -->|fría_o_incompleta| M14[Marcar fría o incompleta<br/>1 solo Sheets node] --> N14[Avisar fría o incompleta<br/>1 solo Gmail, texto por expresión]
-```
-
-"Marcar fría o incompleta" es un único nodo Sheets para las 2 acciones:
-la columna que no le corresponde a esa fila se reescribe con el mismo
-valor que ya tenía (`estado_actual`/`incompleta_actual`, no-op real) en
-vez de dejarla en blanco.
-
-**Rama de deadlines** (72h/24h/6h antes de una obligación con
-`fecha_limite`): tiene su **propio Schedule Trigger horario**, separado
-del Cron diario de 8am — un chequeo una vez al día no puede detectar con
-precisión "faltan 6 horas". Mismo Sheet, mismo Telegram, mismo workflow:
-
-```mermaid
-flowchart TD
-    CH[Cron horario] --> LD[Leer ofertas para deadlines] --> CD[Calcular avisos deadline]
-    CD --> FDR[Filtrar: deadline real<br/>Filter nativo] --> TG[Avisar deadline<br/>Telegram] --> MD[Marcar aviso deadline enviado]
-```
-
 Workflow separado (`error-handler.json`), sin cron propio, disparado por
 n8n cuando el workflow de arriba falla:
 
@@ -91,7 +54,7 @@ del aviso) se trata como incertidumbre, nunca como buena señal.
 1. n8n → Workflows → Import from File → `workflow.json` y por separado
    `error-handler.json`.
 2. El Sticky Note de cada workflow lista qué reemplazar — seguilo en
-   orden, son 9 pasos en el principal.
+   orden, son 8 pasos en el principal.
 3. En "Radar de empleos" → Settings (⚙️) → Error Workflow → elegir
    "Radar de empleos — Error Handler" (tiene que estar ya importado).
 4. Crear un check en [healthchecks.io](https://healthchecks.io) (free
@@ -108,35 +71,15 @@ Todas se crean en n8n (Credentials), nunca hardcodeadas en el JSON:
 
 | Credencial | Tipo n8n | Para qué |
 |---|---|---|
-| Gmail | OAuth2 | leer alertas + mandar mails (resumen, error, seguimiento) + crear borradores de seguimiento |
+| Gmail | OAuth2 | leer alertas + mandar el mail resumen + mandar la alerta de error |
 | Google Sheets | OAuth2 | leer/escribir el Sheet de ofertas |
-| Anthropic | Header Auth (`x-api-key` = `={{ $env.ANTHROPIC_API_KEY }}`) | extracción con Claude Haiku + redacción de borradores de seguimiento |
-| Telegram | Telegram API (bot token) | avisos de deadline (72h/24h/6h antes de una obligación) |
+| Anthropic | Header Auth (`x-api-key` = `={{ $env.ANTHROPIC_API_KEY }}`) | extracción con Claude Haiku |
 
 `ANTHROPIC_API_KEY` va como variable de entorno del contenedor n8n en el
-Docker Compose del VPS, no en el JSON. Ninguna API key **aparece en texto
-plano** en ninguno de los dos workflow JSON de este repo — solo hay
-referencias a credenciales por id interno de n8n (no sirven fuera de tu
-instancia).
-
-Variables de entorno adicionales para la rama de seguimiento (mismo
-Docker Compose, junto a `ANTHROPIC_API_KEY`):
-
-| Variable | Para qué |
-|---|---|
-| `TELEGRAM_CHAT_ID` | a qué chat le llegan los avisos de deadline |
-| `RADAR_SEGUIMIENTO_DRY_RUN` | `true` = calcula qué avisos mandaría (7d/14d/72h/24h/6h) y los imprime en el log de ejecución de n8n, sin crear borradores, sin mandar mails/Telegram, sin escribir en el Sheet. Dejar sin definir (o `false`) en producción |
-
-## Cómo crear el bot de Telegram
-
-1. Hablar con [@BotFather](https://t.me/BotFather) en Telegram, `/newbot`,
-   elegir nombre. Te da un token — va en la credencial n8n "Telegram
-   account" (tipo Telegram API), nunca en el JSON.
-2. Mandarle cualquier mensaje al bot nuevo (ej. "hola") para que tenga un
-   chat que leer.
-3. Abrir `https://api.telegram.org/bot<TOKEN>/getUpdates` en el navegador,
-   buscar `"chat":{"id": ...}` en la respuesta — ese número es
-   `TELEGRAM_CHAT_ID`.
+Docker Compose del VPS, no en el JSON. La API key de Anthropic **nunca
+aparece en texto plano** en ninguno de los dos workflow JSON de este
+repo — solo hay una referencia a la credencial `httpHeaderAuth` por id
+interno de n8n (no sirve fuera de tu instancia).
 
 ## Resiliencia y costo
 
@@ -225,13 +168,10 @@ resolver a mano los 2 ejemplos de
   al dispatcher de "Parsear ofertas" cuando se configure.
 - **Coincidencia de stack es un conteo simple** (mínimo 2 tecnologías de
   `CANDIDATO_STACK` en el texto), no análisis semántico.
-- **El seguimiento post-postulación es por día calendario, no por hora
-  exacta** — "7 días" se cuenta a medianoche UTC, no a la hora exacta en
-  que se cargó `fecha_postulacion`. Los avisos de deadline (72h/24h/6h) sí
-  son horarios, por eso tienen su propio cron cada 1 hora.
-- **Si `avisos_enviados` se edita a mano mal** (typo en el código, coma de
-  más) puede reenviar un aviso ya mandado o saltearse uno — es texto
-  libre, no hay validación de formato en el Sheet.
+- **No trackea nada después de guardarse en el Sheet.** Marcar `postulado`
+  es manual; no hay avisos de seguimiento de entrevistas ni de fechas
+  límite — se evaluó agregar eso y se descartó a propósito por
+  complejidad (ver historial de commits si hace falta retomarlo).
 - **El retry a Claude es de intervalo fijo, no exponencial de verdad**
   (ver sección "Resiliencia y costo"). Si Anthropic tiene una caída larga,
   el workflow igual va a agotar los 4 intentos rápido y esas ofertas caen
