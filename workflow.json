@@ -1,44 +1,22 @@
 {
-  "name": "Radar de empleos",
+  "name": "Radar de empleos v2",
   "nodes": [
     {
-      "typeVersion": 1.2,
-      "position": [
-        -200,
-        200
-      ],
-      "id": "cron-diario",
-      "name": "Cron diario",
-      "type": "n8n-nodes-base.scheduleTrigger",
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 8 * * *"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "typeVersion": 2.1,
-      "position": [
-        80,
-        100
-      ],
-      "id": "leer-alertas-gmail",
-      "name": "Leer alertas Gmail",
-      "type": "n8n-nodes-base.gmail",
-      "parameters": {
-        "resource": "message",
         "operation": "getAll",
         "returnAll": true,
         "filters": {
-          "q": "(from:linkedin.com OR from:indeed.com OR from:computrabajo.com OR from:bumeran.com) newer_than:1d"
-        },
-        "simple": false
+          "q": "(from:linkedin.com OR from:indeed.com OR from:bumeran.com) newer_than:1d"
+        }
       },
+      "typeVersion": 2.1,
+      "position": [
+        4176,
+        3200
+      ],
+      "id": "103f5944-30bd-4e6b-8076-5c03552fc4ae",
+      "name": "Leer alertas Gmail",
+      "type": "n8n-nodes-base.gmail",
       "credentials": {
         "gmailOAuth2": {
           "id": "REEMPLAZAR",
@@ -47,93 +25,85 @@
       }
     },
     {
-      "typeVersion": 4.5,
-      "position": [
-        80,
-        340
-      ],
-      "id": "leer-ofertas-vistas",
-      "name": "Leer ofertas ya vistas",
-      "type": "n8n-nodes-base.googleSheets",
       "parameters": {
-        "operation": "read",
         "documentId": {
+          "__rl": true,
           "mode": "id",
           "value": "TU_SHEET_ID_AQUI"
         },
         "sheetName": {
-          "mode": "name",
-          "value": "Ofertas"
+          "__rl": true,
+          "mode": "list",
+          "value": "gid=0",
+          "cachedResultName": "Ofertas",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/TU_SHEET_ID_AQUI/edit#gid=0"
         },
         "options": {}
       },
+      "typeVersion": 4.5,
+      "position": [
+        4160,
+        3488
+      ],
+      "id": "027ea363-1f50-479e-8480-aae07a3abd66",
+      "name": "Leer ofertas ya vistas",
+      "type": "n8n-nodes-base.googleSheets",
+      "alwaysOutputData": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "REEMPLAZAR",
-          "name": "Google Sheets Account"
+          "name": "Google Sheets account"
         }
       }
     },
     {
+      "parameters": {
+        "jsCode": "// Separa cada mail de alerta en ofertas individuales — dispatcher por\n// remitente, porque cada sitio arma el mail totalmente distinto (verificado\n// contra mails reales del 2026-09-07: Indeed = 1 oferta/mail con datos\n// reales de empresa/puesto/ubicación en el cuerpo; Bumeran = batch sin link\n// en texto plano, requiere el html del mail). Computrabajo se sacó del\n// filtro de Gmail — sus mails son puro teaser sin datos de oferta (\"Empresas\n// buscan talento para puestos de X, postulate ahora\" + link a un grid de\n// búsqueda), no hay nada que extraer.\n//\n// ASUNCIÓN SIN VALIDAR (igual que el split de LinkedIn de la v1): los\n// nombres de campo item.json.from / item.json.subject / item.json.textHtml\n// son el formato esperado del nodo Gmail en esta instancia de n8n — no se\n// pudo confirmar contra una ejecución real todavía. Si \"Aplicar tope de\n// seguridad\" reporta 0 ofertas de una fuente que sabés que llegó, revisar\n// acá primero.\n\nfunction textoDe(item) {\n  return item.json.textPlain || item.json.text || item.json.snippet || '';\n}\nfunction htmlDe(item) {\n  return item.json.textHtml || item.json.html || '';\n}\nfunction remitenteDe(item) {\n  return String(item.json.from || item.json.sender || '').toLowerCase();\n}\n\nfunction parsearLinkedIn(item) {\n  const cuerpo = textoDe(item);\n  const regexLink = /https:\\/\\/www\\.linkedin\\.com\\/comm\\/jobs\\/view\\/\\d+[^\\s)>\\]]*/g;\n  const matches = [...cuerpo.matchAll(regexLink)];\n  if (matches.length === 0) return [{ link: null, texto_oferta: cuerpo.trim(), fuente: 'linkedin' }];\n  const out = [];\n  for (let i = 0; i < matches.length; i++) {\n    const inicio = i === 0 ? 0 : matches[i - 1].index + matches[i - 1][0].length;\n    const fin = matches[i].index + matches[i][0].length;\n    out.push({ link: matches[i][0], texto_oferta: cuerpo.slice(inicio, fin).trim(), fuente: 'linkedin' });\n  }\n  return out;\n}\n\nfunction parsearIndeed(item) {\n  // 1 oferta por mail — empresa/puesto vienen en el subject, no en el cuerpo.\n  // link queda null a propósito: el link de Indeed es un redirect\n  // cts.indeed.com de un solo uso, no sirve como referencia estable. El\n  // dedup usa empresa+puesto (normalizarEmpresaPuesto), no el link.\n  const cuerpo = textoDe(item);\n  const asunto = item.json.subject || '';\n  return [{ link: null, texto_oferta: (asunto + '\\n\\n' + cuerpo).trim(), fuente: 'indeed' }];\n}\n\nfunction parsearBumeran(item) {\n  // El texto plano NO trae links (se pierden al convertir el mail a texto\n  // plano) — hace falta el html. Sin validar todavía contra el HTML real:\n  // en vez de inventar una estructura, esto cae a NO_PARSEABLE (revisar a\n  // mano) hasta confirmar el HTML real y escribir el split de tarjetas.\n  const cuerpoHtml = htmlDe(item);\n  if (!cuerpoHtml) {\n    return [{ link: null, texto_oferta: '', fuente: 'bumeran', error_parseo_mail: true, detalle_error: 'Sin campo html en el item de Gmail — no se puede sacar el link de Bumeran del texto plano.' }];\n  }\n  return [{ link: null, texto_oferta: textoDe(item).trim(), fuente: 'bumeran', error_parseo_mail: true, detalle_error: 'Parser de Bumeran pendiente de validar contra HTML real — cae a revisión manual.' }];\n}\n\nconst items = [];\nconst entrada = $input.all();\nfor (let idx = 0; idx < entrada.length; idx++) {\n  const item = entrada[idx];\n  try {\n    const remitente = remitenteDe(item);\n    let ofertas;\n    if (remitente.includes('linkedin.com')) ofertas = parsearLinkedIn(item);\n    else if (remitente.includes('indeed.com')) ofertas = parsearIndeed(item);\n    else if (remitente.includes('bumeran.com')) ofertas = parsearBumeran(item);\n    else ofertas = [{ link: null, texto_oferta: textoDe(item).trim(), fuente: 'desconocida' }];\n\n    // pairedItem explicito: sin esto n8n no puede rastrear de que mail vino\n    // cada oferta, y $('Parsear ofertas').item devuelve el item equivocado.\n    for (const oferta of ofertas) items.push({ json: oferta, pairedItem: { item: idx } });\n  } catch (e) {\n    items.push({ json: { link: null, texto_oferta: '', fuente: 'error', error_parseo_mail: true, detalle_error: String((e && e.message) || e) }, pairedItem: { item: idx } });\n  }\n}\n\nreturn items;"
+      },
       "typeVersion": 2,
       "position": [
-        320,
-        100
+        4400,
+        3200
       ],
-      "id": "parsear-ofertas",
+      "id": "9cff45be-2868-4a47-96db-9c8743f04ef5",
       "name": "Parsear ofertas",
       "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Separa cada mail de alerta en ofertas individuales — dispatcher por\n// remitente, porque cada sitio arma el mail totalmente distinto (verificado\n// contra mails reales del 2026-08-28: Indeed = 1 oferta/mail con\n// empresa+puesto en el subject; Computrabajo = batch de filas markdown\n// [| || || puesto || empresa || ubicación || fecha |](url); Bumeran = batch\n// sin link en texto plano, requiere el html del mail).\n//\n// ASUNCIÓN SIN VALIDAR (igual que el split de LinkedIn de la v1): los\n// nombres de campo item.json.from / item.json.subject / item.json.textHtml\n// son el formato esperado del nodo Gmail en esta instancia de n8n — no se\n// pudo confirmar contra una ejecución real todavía. Si \"Aplicar tope de\n// seguridad\" reporta 0 ofertas de una fuente que sabés que llegó, revisar\n// acá primero.\n//\n// El regex de Computrabajo se armó leyendo el texto plano real de un mail\n// (vía Gmail API, no vía este nodo n8n) — la conversión HTML→texto plano\n// de n8n puede diferir de la de Gmail API en espacios/formato exacto.\n// Correr una vez, mirar el output de \"Aplicar tope de seguridad\" y ajustar\n// el regex si no matchea.\n\nfunction textoDe(item) {\n  return item.json.textPlain || item.json.text || item.json.snippet || '';\n}\nfunction htmlDe(item) {\n  return item.json.textHtml || item.json.html || '';\n}\nfunction remitenteDe(item) {\n  return String(item.json.from || item.json.sender || '').toLowerCase();\n}\n\nfunction parsearLinkedIn(item) {\n  const cuerpo = textoDe(item);\n  const regexLink = /https:\\/\\/www\\.linkedin\\.com\\/comm\\/jobs\\/view\\/\\d+[^\\s)>\\]]*/g;\n  const matches = [...cuerpo.matchAll(regexLink)];\n  if (matches.length === 0) return [{ link: null, texto_oferta: cuerpo.trim(), fuente: 'linkedin' }];\n  const out = [];\n  for (let i = 0; i < matches.length; i++) {\n    const inicio = i === 0 ? 0 : matches[i - 1].index + matches[i - 1][0].length;\n    const fin = matches[i].index + matches[i][0].length;\n    out.push({ link: matches[i][0], texto_oferta: cuerpo.slice(inicio, fin).trim(), fuente: 'linkedin' });\n  }\n  return out;\n}\n\nfunction parsearIndeed(item) {\n  // 1 oferta por mail — empresa/puesto vienen en el subject, no en el cuerpo.\n  // link queda null a propósito: el link de Indeed es un redirect\n  // cts.indeed.com de un solo uso, no sirve como referencia estable. El\n  // dedup usa empresa+puesto (normalizarEmpresaPuesto), no el link.\n  const cuerpo = textoDe(item);\n  const asunto = item.json.subject || '';\n  return [{ link: null, texto_oferta: (asunto + '\\n\\n' + cuerpo).trim(), fuente: 'indeed' }];\n}\n\nfunction parsearComputrabajo(item) {\n  // Cada oferta del batch es una fila markdown:\n  // [| || || <puesto> || <empresa> || <ubicación> || <fecha> |](url)\n  const cuerpo = textoDe(item);\n  const regexFila = /\\[\\|\\s*\\|\\|\\s*\\|\\|\\s*([^|]+?)\\s*\\|\\|\\s*([^|]+?)\\s*\\|\\|\\s*([^|]+?)\\s*\\|\\|\\s*([^|]+?)\\s*\\|\\]\\(([^)]+)\\)/g;\n  const out = [];\n  let m;\n  while ((m = regexFila.exec(cuerpo)) !== null) {\n    const puesto = m[1], empresa = m[2], ubicacion = m[3], fecha = m[4], url = m[5];\n    out.push({ link: url, texto_oferta: puesto + ' — ' + empresa + ' — ' + ubicacion + ' — ' + fecha, fuente: 'computrabajo' });\n  }\n  if (out.length === 0) return [{ link: null, texto_oferta: cuerpo.trim(), fuente: 'computrabajo' }];\n  return out;\n}\n\nfunction parsearBumeran(item) {\n  // El texto plano NO trae links (se pierden al convertir el mail a texto\n  // plano) — hace falta el html. Sin validar todavía contra el HTML real:\n  // en vez de inventar una estructura, esto cae a NO_PARSEABLE (revisar a\n  // mano) hasta confirmar el HTML real y escribir el split de tarjetas.\n  const cuerpoHtml = htmlDe(item);\n  if (!cuerpoHtml) {\n    return [{ link: null, texto_oferta: '', fuente: 'bumeran', error_parseo_mail: true, detalle_error: 'Sin campo html en el item de Gmail — no se puede sacar el link de Bumeran del texto plano.' }];\n  }\n  return [{ link: null, texto_oferta: textoDe(item).trim(), fuente: 'bumeran', error_parseo_mail: true, detalle_error: 'Parser de Bumeran pendiente de validar contra HTML real — cae a revisión manual.' }];\n}\n\nconst items = [];\nfor (const item of $input.all()) {\n  try {\n    const remitente = remitenteDe(item);\n    let ofertas;\n    if (remitente.includes('linkedin.com')) ofertas = parsearLinkedIn(item);\n    else if (remitente.includes('indeed.com')) ofertas = parsearIndeed(item);\n    else if (remitente.includes('computrabajo.com')) ofertas = parsearComputrabajo(item);\n    else if (remitente.includes('bumeran.com')) ofertas = parsearBumeran(item);\n    else ofertas = [{ link: null, texto_oferta: textoDe(item).trim(), fuente: 'desconocida' }];\n\n    for (const oferta of ofertas) items.push({ json: oferta });\n  } catch (e) {\n    items.push({ json: { link: null, texto_oferta: '', fuente: 'error', error_parseo_mail: true, detalle_error: String((e && e.message) || e) } });\n  }\n}\n\nreturn items;"
-      }
+      "onError": "continueRegularOutput"
     },
     {
+      "parameters": {
+        "jsCode": "// Tope duro de ofertas procesadas por corrida, para que un día raro (mail\n// mal filtrado, alerta que trae 200 avisos) no genere una factura\n// inesperada de la API de Claude. Cambiá este número si el volumen normal\n// de alertas crece — es la única variable que hay que tocar.\nconst MAX_OFERTAS_POR_CORRIDA = 30;\n\nconst items = $input.all();\nconst totalDetectado = items.length;\nconst excedeTope = totalDetectado > MAX_OFERTAS_POR_CORRIDA;\nconst procesar = excedeTope ? items.slice(0, MAX_OFERTAS_POR_CORRIDA) : items;\n\n// El flag va en todos los items que siguen para que \"Armar mail resumen\"\n// (que corre una sola vez al final) pueda mostrar el aviso sin nodos extra.\nreturn procesar.map((item, i) => ({\n  json: {\n    ...item.json,\n    _tope_alcanzado: excedeTope,\n    _total_detectado: totalDetectado,\n    _procesadas: procesar.length,\n  },\n  // preservar el rastro del item original, si no se rompe $('...').item\n  pairedItem: item.pairedItem !== undefined ? item.pairedItem : { item: i },\n}));"
+      },
       "typeVersion": 2,
       "position": [
-        540,
-        100
+        4624,
+        3200
       ],
-      "id": "tope-seguridad",
+      "id": "0d02d95c-08fc-4013-9245-93e8738bbca0",
       "name": "Aplicar tope de seguridad",
-      "type": "n8n-nodes-base.code",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Tope duro de ofertas procesadas por corrida, para que un día raro (mail\n// mal filtrado, alerta que trae 200 avisos) no genere una factura\n// inesperada de la API de Claude. Cambiá este número si el volumen normal\n// de alertas crece — es la única variable que hay que tocar.\nconst MAX_OFERTAS_POR_CORRIDA = 30;\n\nconst items = $input.all();\nconst totalDetectado = items.length;\nconst excedeTope = totalDetectado > MAX_OFERTAS_POR_CORRIDA;\nconst procesar = excedeTope ? items.slice(0, MAX_OFERTAS_POR_CORRIDA) : items;\n\n// El flag va en todos los items que siguen para que \"Armar mail resumen\"\n// (que corre una sola vez al final) pueda mostrar el aviso sin nodos extra.\nreturn procesar.map((item) => ({\n  json: {\n    ...item.json,\n    _tope_alcanzado: excedeTope,\n    _total_detectado: totalDetectado,\n    _procesadas: procesar.length,\n  },\n}));"
-      }
+      "type": "n8n-nodes-base.code"
     },
     {
-      "typeVersion": 2,
-      "position": [
-        780,
-        100
-      ],
-      "id": "preparar-prompt-ia",
-      "name": "Preparar prompt IA",
-      "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
       "parameters": {
         "mode": "runOnceForEachItem",
         "jsCode": "// Mirror de prompts/extraccion_oferta.md v1.0 — si cambiás el prompt,\n// actualizalo primero ahí (con los 2 ejemplos resueltos a mano) y después\n// pegalo acá.\nconst SYSTEM_PROMPT = \"Sos un extractor de datos, no un evaluador. Tu única tarea es leer el texto\\nde una oferta de trabajo y devolver JSON con los hechos que están\\nLITERALMENTE en el texto. No opines si la oferta es buena o mala. No la\\ncompares con ningún perfil. No hay perfil de candidato en este prompt a\\npropósito: si lo hubiera, ibas a sesgar la extracción.\\n\\nREGLA DURA: si un dato no aparece explícito en el texto, el campo va `null`.\\nNunca inferís, nunca estimás, nunca completás con lo que \\\"es común en este\\ntipo de aviso\\\". Un salario no mencionado es `null`, no \\\"a convenir\\\". Una\\nmodalidad no mencionada es `null`, no \\\"probablemente híbrido\\\".\\n\\nREGLA DURA sobre frases_exclusion: cada elemento del array tiene que ser una\\ncita TEXTUAL, copiada carácter por carácter del aviso original (podés\\nrecortar la oración, pero no parafrasear ni resumir). Si no hay ninguna\\nfrase que excluya candidatos por experiencia, título, o similar, el array\\nva vacío []. Ejemplos de qué SÍ calza en frases_exclusion: \\\"Please only\\napply if you have 5+ years of experience\\\", \\\"Not looking for junior\\nprofiles\\\", \\\"Master's degree required\\\". Ejemplos de qué NO va: cualquier\\nfrase que vos reformules aunque el significado sea el mismo.\\n\\nDevolvé ÚNICAMENTE el JSON, sin texto antes ni después, sin markdown, sin\\n```json. Si algo del formato de abajo no se cumple, tu output es inválido.\\n\\nEsquema exacto:\\n\\n{\\n  \\\"empresa\\\": string | null,\\n  \\\"puesto\\\": string | null,\\n  \\\"modalidad\\\": \\\"remoto\\\" | \\\"híbrido\\\" | \\\"presencial\\\" | null,\\n  \\\"ubicacion_requerida\\\": string | null,\\n  \\\"tipo_contrato\\\": \\\"full time\\\" | \\\"part time\\\" | \\\"freelance\\\" | \\\"pasantía\\\" | null,\\n  \\\"horas_semanales\\\": number | null,\\n  \\\"salario_min\\\": number | null,\\n  \\\"salario_max\\\": number | null,\\n  \\\"salario_moneda\\\": string | null,\\n  \\\"anios_experiencia_min\\\": number | null,\\n  \\\"anios_excluyente\\\": boolean | null,\\n  \\\"titulo_requerido\\\": \\\"grado\\\" | \\\"maestría\\\" | string | null,\\n  \\\"titulo_excluyente\\\": boolean | null,\\n  \\\"frases_exclusion\\\": string[],\\n  \\\"stack\\\": string[],\\n  \\\"postulantes\\\": number | null,\\n  \\\"antiguedad_horas\\\": number | null,\\n  \\\"postulacion_rapida\\\": boolean | null,\\n  \\\"link\\\": string | null,\\n  \\\"confianza_extraccion\\\": number\\n}\\n\\nanios_excluyente y titulo_excluyente van true solo si el texto dice\\nexplícitamente que ese requisito es obligatorio/excluyente (ej: \\\"required\\\",\\n\\\"mandatory\\\", \\\"must have\\\", \\\"excluyente\\\"). Si el texto lo menciona como\\ndeseable o no aclara, van false. Si el dato de experiencia/título ni\\nsiquiera aparece, van null (no false).\\n\\nconfianza_extraccion es tu propia estimación de 0 a 1 de qué tan completo y\\nsin ambigüedad estaba el texto fuente para esta extracción puntual. No mide\\nsi la oferta es buena, mide si vos pudiste leerla bien.\";\n\nconst userPrompt = `Extraé los datos de esta oferta según las reglas del system prompt.\n\nLINK: ${$json.link}\n\nTEXTO DE LA OFERTA:\n${$json.texto_oferta}`;\n\nreturn {\n  json: {\n    ...$json,\n    systemPrompt: SYSTEM_PROMPT,\n    userPrompt,\n  },\n};"
-      }
+      },
+      "typeVersion": 2,
+      "position": [
+        4848,
+        3200
+      ],
+      "id": "3e41cfac-6a73-46be-83d5-5dfab45d0150",
+      "name": "Preparar prompt IA",
+      "type": "n8n-nodes-base.code",
+      "onError": "continueRegularOutput"
     },
     {
-      "typeVersion": 4.2,
-      "position": [
-        1020,
-        100
-      ],
-      "id": "extraer-datos-ia",
-      "name": "Extraer datos con IA",
-      "type": "n8n-nodes-base.httpRequest",
-      "onError": "continueErrorOutput",
-      "retryOnFail": true,
-      "maxTries": 4,
-      "waitBetweenTries": 3000,
       "parameters": {
         "method": "POST",
         "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -150,72 +120,74 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ model: \"claude-haiku-4-5\", max_tokens: 1024, temperature: 0, system: $json.systemPrompt, messages: [{ role: \"user\", content: $json.userPrompt }] }) }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
         "options": {
           "timeout": 30000
         }
       },
+      "typeVersion": 4.2,
+      "position": [
+        5072,
+        3200
+      ],
+      "id": "85698461-9b0c-442a-977a-0ee02fd1ca3a",
+      "name": "Extraer datos con IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 3000,
       "credentials": {
         "httpHeaderAuth": {
           "id": "REEMPLAZAR",
           "name": "Anthropic API Key (x-api-key)"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
     },
     {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Se llega aca cuando 'Extraer datos con IA' agoto los reintentos (429, 529,\n// timeout, red). Mismo criterio de link que en 'Parsear respuesta IA'.\nlet linkOriginal = null;\ntry { linkOriginal = $('Preparar prompt IA').item.json.link; } catch (e) { linkOriginal = null; }\nreturn {\n  json: {\n    error_extraccion: true,\n    link: linkOriginal,\n    respuesta_cruda: { error: ($json && $json.error) || $json },\n  },\n};"
+      },
       "typeVersion": 2,
       "position": [
-        1260,
-        260
+        5296,
+        3296
       ],
-      "id": "marcar-fallo-ia",
+      "id": "584158d6-63ae-4267-ba1a-a6c20e04b070",
       "name": "Marcar fallo llamada IA",
       "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// Se llega acá cuando \"Extraer datos con IA\" agotó los reintentos (429,\n// 529, timeout, error de red). No hay respuesta del modelo para parsear —\n// se marca directo como fallo de extracción, mismo tratamiento que un JSON\n// inválido en \"Parsear respuesta IA\", para no perder la oferta.\nconst linkOriginal = $('Parsear ofertas').item.json.link;\nreturn {\n  json: {\n    error_extraccion: true,\n    link: linkOriginal,\n    respuesta_cruda: { error: ($json && $json.error) || $json },\n  },\n};"
-      }
+      "onError": "continueRegularOutput"
     },
     {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// El link se lee de 'Preparar prompt IA', que esta a UN nodo de distancia y\n// corre en modo runOnceForEachItem: n8n mantiene el pareo de items intacto.\n// Antes leia de 'Parsear ofertas', 4 nodos atras y cruzando dos Code nodes\n// que cambian la cantidad de items -- ahi el pareo se pierde y el link que\n// llegaba al Sheet era el de OTRA oferta.\nlet oferta;\ntry {\n  const texto = $json.content && $json.content[0] ? $json.content[0].text : '';\n  const textoLimpio = texto.replace(/```json\\s*|```/g, '').trim();\n  oferta = JSON.parse(textoLimpio);\n} catch (e) {\n  oferta = null;\n}\n\nlet linkOriginal = null;\ntry { linkOriginal = $('Preparar prompt IA').item.json.link; } catch (e) { linkOriginal = null; }\n\nif (!oferta || typeof oferta !== 'object') {\n  return { json: { error_extraccion: true, link: linkOriginal, respuesta_cruda: $json } };\n}\n\noferta.link = linkOriginal || oferta.link || null;\nreturn { json: oferta };"
+      },
       "typeVersion": 2,
       "position": [
-        1260,
-        100
+        5296,
+        3104
       ],
-      "id": "parsear-respuesta-ia",
+      "id": "1aa3edab-f017-4d08-8780-cd98b2c2ddb6",
       "name": "Parsear respuesta IA",
-      "type": "n8n-nodes-base.code",
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "let oferta;\ntry {\n  const texto = $json.content && $json.content[0] ? $json.content[0].text : '';\n  oferta = JSON.parse(texto);\n} catch (e) {\n  oferta = null;\n}\n\nconst linkOriginal = $('Parsear ofertas').item.json.link;\n\nif (!oferta) {\n  return { json: { error_extraccion: true, link: linkOriginal, respuesta_cruda: $json } };\n}\n\noferta.link = linkOriginal || oferta.link || null;\nreturn { json: oferta };"
-      }
+      "type": "n8n-nodes-base.code"
     },
     {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Mirror de reglas.js — si cambias una regla, cambiala ahi primero, corre\n// `node --test tests/` y despues pegala aca.\nconst MAX_ANIOS_TOLERADO = 3;\nconst MAX_POSTULANTES_BAJA_COMPETENCIA = 25;\nconst MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA = 6;\nconst MIN_COINCIDENCIAS_STACK = 2;\n\n// Stack real de Simon. Editar a mano cuando cambie el CV.\nconst CANDIDATO_STACK = ['react','node','express','javascript','typescript','postgres','postgresql','supabase','n8n','docker','python','flutter','angular','html','css','wordpress'];\n\n// OJO: antes esta lista tenia 'junior' y 'entry level' sueltos, y como\n// alcanzaba con que la palabra apareciera en cualquier frase, descartaba\n// justo los avisos que te sirven (\"Junior Developer\", \"entry level welcome\").\n// Ahora solo frases que de verdad excluyen.\nconst TERMINOS_EXCLUYEN_PERFIL = [\n  'no junior','not junior','no juniors','not looking for junior','sin junior',\n  'senior only','solo senior','only senior','no entry level','no bootcamp',\n  'do not apply if','no apliques si','must have 5','5+ years required'\n];\n\n// Titulos que NO tenes. Una tecnicatura en curso no te excluye de un aviso\n// que pide \"tecnicatura\" — antes descartaba por cualquier titulo excluyente.\nconst TITULOS_QUE_NO_TENES = ['grado','licenciatura','maestria','master','bachelor','ingenieria','ingeniero','phd','doctorado'];\n\nfunction norm(t) {\n  return String(t === null || t === undefined ? '' : t)\n    .toLowerCase()\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '');\n}\n\nfunction normalizarEmpresaPuesto(empresa, puesto) {\n  const n = (t) => norm(t)\n    .replace(/\\b(s\\.?a\\.?|s\\.?r\\.?l\\.?|inc\\.?|ltd\\.?|llc\\.?)\\b/g, '')\n    .replace(/[^a-z0-9]+/g, ' ')\n    .trim();\n  return n(empresa) + '::' + n(puesto);\n}\n\nfunction contarCoincidenciasStack(ofertaStack) {\n  const stackOferta = (Array.isArray(ofertaStack) ? ofertaStack : []).map(norm).filter((t) => t.length >= 2);\n  return CANDIDATO_STACK.filter((tech) => stackOferta.some((t) => t === tech || t.includes(tech))).length;\n}\n\nfunction fraseExcluyePerfil(frasesExclusion) {\n  const texto = norm((Array.isArray(frasesExclusion) ? frasesExclusion : []).join(' '));\n  return TERMINOS_EXCLUYEN_PERFIL.find((t) => texto.includes(t)) || null;\n}\n\nfunction tituloQueNoTenes(tituloRequerido) {\n  const t = norm(tituloRequerido);\n  if (!t) return null;\n  return TITULOS_QUE_NO_TENES.find((x) => t.includes(x)) || null;\n}\n\n// Construye la fila que va al Sheet. TODOS los campos existen siempre y son\n// string o numero — nunca undefined. Esta es la razon por la que el Sheet\n// escribia basura: el mapeo hacia $json.stack.join(', ') y en los items con\n// error 'stack' no existia.\nfunction fila(o, estado, motivo, dedupKey) {\n  const s = (v) => (v === null || v === undefined) ? '' : String(v);\n  const n = (v) => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? '' : Number(v);\n  const base = o || {};\n  return {\n    dedup_key: dedupKey,\n    fecha_detectada: new Date().toISOString().slice(0, 19).replace('T', ' '),\n    empresa: s(base.empresa),\n    puesto: s(base.puesto),\n    modalidad: s(base.modalidad),\n    tipo_contrato: s(base.tipo_contrato),\n    horas_semanales: n(base.horas_semanales),\n    salario_min: n(base.salario_min),\n    salario_max: n(base.salario_max),\n    salario_moneda: s(base.salario_moneda),\n    anios_experiencia_min: n(base.anios_experiencia_min),\n    stack: Array.isArray(base.stack) ? base.stack.join(', ') : '',\n    postulantes: n(base.postulantes),\n    antiguedad_horas: n(base.antiguedad_horas),\n    confianza_extraccion: n(base.confianza_extraccion),\n    link: s(base.link),\n    estado: estado,\n    motivo: motivo,\n    // interno, para ordenar el mail resumen. No se mapea al Sheet.\n    // Los datos del tope NO se leen aca: el nodo HTTP reemplaza el json\n    // entero, asi que _tope_alcanzado muere antes de llegar. El mail lo lee\n    // directo de 'Aplicar tope de seguridad'.\n    _horas_raw: (base.horas_semanales === null || base.horas_semanales === undefined) ? null : Number(base.horas_semanales),\n  };\n}\n\n// dedup_key unica por item aun dentro del mismo milisegundo.\nlet contadorError = 0;\nfunction dedupKeyError(link) {\n  contadorError++;\n  return 'no_parseable::' + (link || 'sin-link') + '::' + Date.now() + '-' + contadorError + '-' + Math.random().toString(36).slice(2, 8);\n}\n\ntry {\n  const oferta = $json;\n\n  if (oferta.error_extraccion) {\n    return { json: fila(oferta, 'NO_PARSEABLE', 'El modelo no devolvio JSON valido (o la llamada fallo tras reintentos) — revisar a mano.', dedupKeyError(oferta.link)) };\n  }\n\n  const dedupKey = normalizarEmpresaPuesto(oferta.empresa, oferta.puesto);\n\n  let vistas = [];\n  try { vistas = $('Leer ofertas ya vistas').all().map((i) => i.json); } catch (e) { vistas = []; }\n  const yaPostulado = vistas.some((v) => v && v.dedup_key === dedupKey && String(v.postulado).toLowerCase() === 'true');\n\n  let estado, motivo;\n\n  if (yaPostulado) {\n    estado = 'DESCARTAR';\n    motivo = 'Ya te postulaste a este puesto en esta empresa.';\n  } else if (Number(oferta.anios_experiencia_min) > MAX_ANIOS_TOLERADO && oferta.anios_excluyente === true) {\n    estado = 'DESCARTAR';\n    motivo = 'Pide ' + oferta.anios_experiencia_min + '+ anios de experiencia de forma excluyente.';\n  } else if (oferta.titulo_excluyente === true && tituloQueNoTenes(oferta.titulo_requerido)) {\n    estado = 'DESCARTAR';\n    motivo = 'Pide titulo (' + (oferta.titulo_requerido || 'sin especificar') + ') de forma excluyente y no lo tenes.';\n  } else {\n    const frase = fraseExcluyePerfil(oferta.frases_exclusion);\n    if (frase) {\n      const cita = (oferta.frases_exclusion || []).find((f) => norm(f).includes(frase)) || frase;\n      estado = 'DESCARTAR';\n      motivo = 'El aviso excluye tu perfil: \"' + cita + '\"';\n    } else {\n      const coincidencias = contarCoincidenciasStack(oferta.stack);\n      const coincidenciaReal = coincidencias >= MIN_COINCIDENCIAS_STACK;\n      const seniales = [];\n      if (oferta.postulantes !== null && oferta.postulantes !== undefined && Number(oferta.postulantes) < MAX_POSTULANTES_BAJA_COMPETENCIA) seniales.push(oferta.postulantes + ' postulantes');\n      if (oferta.antiguedad_horas !== null && oferta.antiguedad_horas !== undefined && Number(oferta.antiguedad_horas) < MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA) seniales.push('publicada hace ' + oferta.antiguedad_horas + 'hs');\n      if (oferta.postulacion_rapida === true) seniales.push('postulacion rapida disponible');\n\n      if (coincidenciaReal && seniales.length > 0) {\n        estado = 'POSTULAR YA';\n        motivo = 'Stack coincide (' + coincidencias + ' tecnologias) y competencia baja: ' + seniales.join(', ') + '.';\n      } else if (!coincidenciaReal) {\n        estado = 'MIRAR';\n        motivo = 'Stack no coincide lo suficiente (' + coincidencias + '/' + MIN_COINCIDENCIAS_STACK + ' tecnologias).';\n      } else {\n        estado = 'MIRAR';\n        motivo = 'Sin datos de competencia — incierto, no se asume baja competencia.';\n      }\n    }\n  }\n\n  return { json: fila(oferta, estado, motivo, dedupKey) };\n} catch (e) {\n  return { json: fila($json, 'NO_PARSEABLE', 'Error inesperado aplicando reglas: ' + String((e && e.message) || e) + ' — revisar a mano.', dedupKeyError($json ? $json.link : null)) };\n}"
+      },
       "typeVersion": 2,
       "position": [
-        1280,
-        100
+        5520,
+        3200
       ],
-      "id": "aplicar-reglas",
+      "id": "e284e84f-0235-4e31-b460-4cac4b6dc99a",
       "name": "Aplicar reglas de decisión",
       "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "// Mirror de C:\\\\Users\\\\marco\\\\radar-empleos\\\\reglas.js — si cambiás una\n// regla, cambiala ahí primero, corré `node --test tests/`, y después pegala\n// acá. Los tests de reglas.js son la referencia de qué tiene que pasar.\nconst MAX_ANIOS_TOLERADO = 3;\nconst MAX_POSTULANTES_BAJA_COMPETENCIA = 25;\nconst MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA = 6;\nconst MIN_COINCIDENCIAS_STACK = 2;\n// Stack real de Marco (perfil Full Stack / Automation Engineer). Editar\n// acá a mano cuando cambie el CV.\nconst CANDIDATO_STACK = ['react', 'node', 'express', 'javascript', 'php', 'postgres', 'supabase', 'html', 'css', 'n8n'];\nconst TERMINOS_EXCLUYEN_PERFIL = ['junior', 'entry level', 'entry-level', 'recent grad', 'recent graduate', 'bootcamp', 'no bootcamp'];\n\nfunction normalizarEmpresaPuesto(empresa, puesto) {\n  const normalizar = (texto) => (texto || '')\n    .toLowerCase()\n    .normalize('NFD').replace(new RegExp('[̀-ͯ]', 'g'), '')\n    .replace(/\\b(s\\.?a\\.?|s\\.?r\\.?l\\.?|inc\\.?|ltd\\.?|llc\\.?)\\b/g, '')\n    .replace(/[^a-z0-9]+/g, ' ')\n    .trim();\n  return `${normalizar(empresa)}::${normalizar(puesto)}`;\n}\n\nfunction contarCoincidenciasStack(ofertaStack) {\n  const stackOferta = (ofertaStack || []).map((t) => t.toLowerCase());\n  return CANDIDATO_STACK.filter((tech) => stackOferta.some((t) => t.includes(tech) || tech.includes(t))).length;\n}\n\nfunction fraseExcluyePerfil(frasesExclusion) {\n  const texto = (frasesExclusion || []).join(' ').toLowerCase();\n  return TERMINOS_EXCLUYEN_PERFIL.find((t) => texto.includes(t)) || null;\n}\n\n// Dedup key única por ítem (nunca null) para que un error nunca pise ni sea\n// pisado por otra fila en el appendOrUpdate por dedup_key de \"Guardar en\n// Sheet\". sufijoUnico es param para poder testear determinísticamente en\n// reglas.js — acá siempre Date.now().\nfunction generarDedupKeyError(link, sufijoUnico) {\n  const base = link || 'sin-link';\n  const sufijo = sufijoUnico !== undefined ? sufijoUnico : Date.now();\n  return `no_parseable::${base}::${sufijo}`;\n}\n\ntry {\n  const oferta = $json;\n\n  if (oferta.error_extraccion) {\n    return {\n      json: {\n        ...oferta,\n        estado: 'NO_PARSEABLE',\n        motivo: 'El modelo no devolvió JSON válido (o la llamada falló tras reintentos) — revisar a mano.',\n        dedup_key: generarDedupKeyError(oferta.link),\n      },\n    };\n  }\n\n  const dedupKey = normalizarEmpresaPuesto(oferta.empresa, oferta.puesto);\n  const vistas = $('Leer ofertas ya vistas').all().map((i) => i.json);\n  const yaPostulado = vistas.some((v) => v.dedup_key === dedupKey && String(v.postulado).toLowerCase() === 'true');\n\n  let estado, motivo;\n\n  if (yaPostulado) {\n    estado = 'DESCARTAR';\n    motivo = 'Ya te postulaste a este puesto en esta empresa.';\n  } else if (oferta.anios_experiencia_min > MAX_ANIOS_TOLERADO && oferta.anios_excluyente === true) {\n    estado = 'DESCARTAR';\n    motivo = `Pide ${oferta.anios_experiencia_min}+ años de experiencia de forma excluyente.`;\n  } else if (oferta.titulo_excluyente === true) {\n    estado = 'DESCARTAR';\n    motivo = `Pide título (${oferta.titulo_requerido || 'sin especificar'}) de forma excluyente.`;\n  } else {\n    const fraseExcluyente = fraseExcluyePerfil(oferta.frases_exclusion);\n    if (fraseExcluyente) {\n      const cita = (oferta.frases_exclusion || []).find((f) => f.toLowerCase().includes(fraseExcluyente));\n      estado = 'DESCARTAR';\n      motivo = `El aviso excluye tu perfil: \"${cita}\"`;\n    } else {\n      const coincidencias = contarCoincidenciasStack(oferta.stack);\n      const coincidenciaReal = coincidencias >= MIN_COINCIDENCIAS_STACK;\n      const seniales = [];\n      if (oferta.postulantes !== null && oferta.postulantes !== undefined && oferta.postulantes < MAX_POSTULANTES_BAJA_COMPETENCIA) seniales.push(`${oferta.postulantes} postulantes`);\n      if (oferta.antiguedad_horas !== null && oferta.antiguedad_horas !== undefined && oferta.antiguedad_horas < MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA) seniales.push(`publicada hace ${oferta.antiguedad_horas}hs`);\n      if (oferta.postulacion_rapida === true) seniales.push('postulación rápida disponible');\n      const competenciaBaja = seniales.length > 0;\n\n      if (coincidenciaReal && competenciaBaja) {\n        estado = 'POSTULAR YA';\n        motivo = `Stack coincide (${coincidencias} tecnologías) y competencia baja: ${seniales.join(', ')}.`;\n      } else if (!coincidenciaReal) {\n        estado = 'MIRAR';\n        motivo = `Stack no coincide lo suficiente (${coincidencias}/${MIN_COINCIDENCIAS_STACK} tecnologías).`;\n      } else {\n        estado = 'MIRAR';\n        motivo = 'Sin datos de competencia — incierto, no se asume baja competencia.';\n      }\n    }\n  }\n\n  return { json: { ...oferta, dedup_key: dedupKey, estado, motivo, stack_join: (oferta.stack || []).join(', ') } };\n} catch (e) {\n  // Cualquier forma inesperada de la oferta (campo con tipo raro, etc.) no\n  // tira el resto del batch — se marca para revisión manual, igual que un\n  // JSON inválido del modelo.\n  return {\n    json: {\n      error_extraccion: true,\n      estado: 'NO_PARSEABLE',\n      motivo: `Error inesperado aplicando reglas: ${String((e && e.message) || e)} — revisar a mano.`,\n      dedup_key: generarDedupKeyError($json ? $json.link : null),\n      link: $json ? $json.link : null,\n    },\n  };\n}"
-      }
+      "onError": "continueRegularOutput"
     },
     {
-      "typeVersion": 4.5,
-      "position": [
-        1520,
-        100
-      ],
-      "id": "guardar-en-sheet",
-      "name": "Guardar en Sheet",
-      "type": "n8n-nodes-base.googleSheets",
       "parameters": {
         "operation": "appendOrUpdate",
         "documentId": {
@@ -223,17 +195,17 @@
           "value": "TU_SHEET_ID_AQUI"
         },
         "sheetName": {
-          "mode": "name",
-          "value": "Ofertas"
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Ofertas",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/TU_SHEET_ID_AQUI/edit#gid=0"
         },
         "columns": {
           "mappingMode": "defineBelow",
-          "matchingColumns": [
-            "dedup_key"
-          ],
           "value": {
-            "fecha_detectada": "={{ $now.toISODate() }}",
             "dedup_key": "={{ $json.dedup_key }}",
+            "fecha_detectada": "={{ $json.fecha_detectada }}",
             "empresa": "={{ $json.empresa }}",
             "puesto": "={{ $json.puesto }}",
             "modalidad": "={{ $json.modalidad }}",
@@ -243,58 +215,88 @@
             "salario_max": "={{ $json.salario_max }}",
             "salario_moneda": "={{ $json.salario_moneda }}",
             "anios_experiencia_min": "={{ $json.anios_experiencia_min }}",
-            "stack": "={{ $json.stack_join }}",
+            "stack": "={{ $json.stack }}",
             "postulantes": "={{ $json.postulantes }}",
             "antiguedad_horas": "={{ $json.antiguedad_horas }}",
             "confianza_extraccion": "={{ $json.confianza_extraccion }}",
             "link": "={{ $json.link }}",
             "estado": "={{ $json.estado }}",
-            "motivo": "={{ $json.motivo }}",
-            "fuente": "={{ $json.fuente }}"
-          }
+            "motivo": "={{ $json.motivo }}"
+          },
+          "matchingColumns": [
+            "dedup_key"
+          ],
+          "schema": [
+            { "id": "fecha_detectada", "displayName": "fecha_detectada", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "dedup_key", "displayName": "dedup_key", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "empresa", "displayName": "empresa", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "puesto", "displayName": "puesto", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "modalidad", "displayName": "modalidad", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "tipo_contrato", "displayName": "tipo_contrato", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "horas_semanales", "displayName": "horas_semanales", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "salario_min", "displayName": "salario_min", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "salario_max", "displayName": "salario_max", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "salario_moneda", "displayName": "salario_moneda", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "anios_experiencia_min", "displayName": "anios_experiencia_min", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "stack", "displayName": "stack", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "postulantes", "displayName": "postulantes", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "antiguedad_horas", "displayName": "antiguedad_horas", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "confianza_extraccion", "displayName": "confianza_extraccion", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "link", "displayName": "link", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "estado", "displayName": "estado", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "motivo", "displayName": "motivo", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "postulado", "displayName": "postulado", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
         },
         "options": {}
       },
+      "typeVersion": 4.5,
+      "position": [
+        5744,
+        3200
+      ],
+      "id": "78639b4c-26bf-471f-b5d6-c44a5b4ffa6b",
+      "name": "Guardar en Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "alwaysOutputData": true,
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "REEMPLAZAR",
-          "name": "Google Sheets Account"
+          "name": "Google Sheets account"
         }
       }
     },
     {
+      "parameters": {
+        "jsCode": "// Lee de \"Aplicar reglas de decision\", NO de la salida de \"Guardar en Sheet\".\n// El nodo de Google Sheets devuelve solo las columnas mapeadas, asi que los\n// campos internos (_tope_alcanzado, _horas_raw) se perdian y el aviso de tope\n// nunca aparecia.\nlet items = [];\ntry { items = $('Aplicar reglas de decisión').all().map((i) => i.json); }\ncatch (e) { items = $input.all().map((i) => i.json); }\n\nconst orden = (a, b) => {\n  const d = (x) => (x._horas_raw === null || x._horas_raw === undefined) ? 999 : Math.abs(x._horas_raw - 20);\n  return d(a) - d(b);\n};\n\nconst postularYa = items.filter((o) => o.estado === 'POSTULAR YA').sort(orden);\nconst mirar = items.filter((o) => o.estado === 'MIRAR').sort(orden);\nconst noParseables = items.filter((o) => o.estado === 'NO_PARSEABLE');\nconst descartadas = items.filter((o) => o.estado === 'DESCARTAR');\n\n// El tope se lee de su propio nodo. No viaja en los items porque el nodo\n// HTTP de Anthropic reemplaza el json entero a mitad del camino.\nlet tope = {};\ntry { tope = $('Aplicar tope de seguridad').first().json || {}; } catch (e) { tope = {}; }\nconst topeAlcanzado = tope._tope_alcanzado === true;\n\nconst esc = (s) => String(s === null || s === undefined ? '' : s)\n  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\nconst avisoTope = !topeAlcanzado ? '' :\n  '<p style=\"background:#fee2e2;padding:8px;border-radius:4px;\">Tope de seguridad alcanzado: se detectaron ' +\n  (tope._total_detectado || 0) + ' ofertas y se procesaron ' + (tope._procesadas || 0) +\n  '. Revisa el resto a mano en Gmail.</p>';\n\nconst filaOferta = (o) => '<tr><td style=\"padding:6px;border-bottom:1px solid #eee;\">' +\n  (o.link ? '<a href=\"' + esc(o.link) + '\">' : '') +\n  esc(o.puesto || '(sin puesto)') + ' — ' + esc(o.empresa || '(sin empresa)') +\n  (o.link ? '</a>' : '') +\n  (o.horas_semanales ? ' (' + esc(o.horas_semanales) + 'hs/sem)' : '') +\n  '</td><td style=\"padding:6px;border-bottom:1px solid #eee;\">' + esc(o.motivo) + '</td></tr>';\n\nconst filaNoParseable = (o) => '<tr><td style=\"padding:6px;border-bottom:1px solid #eee;\">' +\n  (o.link ? '<a href=\"' + esc(o.link) + '\">' + esc(o.link) + '</a>' : '(sin link)') +\n  '</td><td style=\"padding:6px;border-bottom:1px solid #eee;\">' + esc(o.motivo) + '</td></tr>';\n\nconst seccion = (titulo, lista, fn) => lista.length === 0 ? '' :\n  '<h2 style=\"font-size:16px;\">' + titulo + ' (' + lista.length + ')</h2><table style=\"width:100%;border-collapse:collapse;\">' +\n  lista.map(fn || filaOferta).join('') + '</table>';\n\nconst html = '<div style=\"font-family:sans-serif;max-width:640px;\">' +\n  avisoTope +\n  seccion('Postular ya', postularYa) +\n  seccion('Mirar', mirar) +\n  seccion('No se pudo procesar — revisar a mano', noParseables, filaNoParseable) +\n  '<p>Descartadas: ' + descartadas.length + '</p>' +\n  '</div>';\n\nreturn [{ json: { asunto: 'Radar de empleos — ' + postularYa.length + ' para postular ya', html: html } }];"
+      },
       "typeVersion": 2,
       "position": [
-        1760,
-        100
+        5968,
+        3200
       ],
-      "id": "armar-mail-resumen",
+      "id": "2c931eab-318e-4c25-b360-c79e9deefae9",
       "name": "Armar mail resumen",
       "type": "n8n-nodes-base.code",
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const items = $input.all().map((i) => i.json);\n\nconst postularYa = items.filter((o) => o.estado === 'POSTULAR YA').sort((a, b) => {\n  const distA = a.horas_semanales == null ? 999 : Math.abs(a.horas_semanales - 20);\n  const distB = b.horas_semanales == null ? 999 : Math.abs(b.horas_semanales - 20);\n  return distA - distB; // más cerca de 20hs/semana primero — preferencia de Marco, no cambia el estado\n});\nconst mirar = items.filter((o) => o.estado === 'MIRAR');\nconst noParseables = items.filter((o) => o.estado === 'NO_PARSEABLE');\nconst descartadas = items.filter((o) => o.estado === 'DESCARTAR');\n\nconst topeAlcanzado = items.length > 0 && items[0]._tope_alcanzado === true;\nconst totalDetectado = items.length > 0 ? items[0]._total_detectado : 0;\nconst procesadas = items.length > 0 ? items[0]._procesadas : 0;\n\nconst avisoTope = !topeAlcanzado ? '' : `\n  <p style=\"background:#fee2e2; padding:8px; border-radius:4px;\">⚠️ Tope de\n  seguridad alcanzado: se detectaron ${totalDetectado} ofertas, se\n  procesaron solo ${procesadas}. Revisá a mano el resto en Gmail (label\n  radar-empleos).</p>`;\n\nconst filaOferta = (o) => `\n  <tr>\n    <td><a href=\"${o.link || '#'}\">${o.puesto || '(sin puesto)'} — ${o.empresa || '(sin empresa)'}</a>${o.horas_semanales ? ` (${o.horas_semanales}hs/sem)` : ''}</td>\n    <td>${o.motivo || ''}</td>\n  </tr>`;\n\nconst filaNoParseable = (o) => `\n  <tr>\n    <td><a href=\"${o.link || '#'}\">${o.link || '(sin link)'}</a></td>\n    <td>${o.motivo || ''}</td>\n  </tr>`;\n\nconst seccion = (titulo, lista, fila) => lista.length === 0 ? '' : `\n  <h2>${titulo} (${lista.length})</h2>\n  <table cellpadding=\"6\">${lista.map(fila || filaOferta).join('')}</table>`;\n\nconst html = `\n  <div style=\"font-family: sans-serif; max-width: 600px;\">\n    ${avisoTope}\n    ${seccion('🟢 Postular ya', postularYa)}\n    ${seccion('🟡 Mirar', mirar)}\n    ${seccion('⚠️ No se pudo procesar — revisar a mano', noParseables, filaNoParseable)}\n    <p>🔴 Descartadas: ${descartadas.length}</p>\n  </div>`;\n\nreturn [{\n  json: {\n    asunto: `Radar de empleos — ${postularYa.length} para postular ya`,\n    html,\n  },\n}];"
-      }
+      "onError": "continueRegularOutput"
     },
     {
-      "typeVersion": 2.1,
-      "position": [
-        2000,
-        100
-      ],
-      "id": "enviar-mail-resumen",
-      "name": "Enviar mail resumen",
-      "type": "n8n-nodes-base.gmail",
       "parameters": {
-        "resource": "message",
-        "operation": "send",
         "sendTo": "REEMPLAZAR@ejemplo.com",
         "subject": "={{ $json.asunto }}",
-        "emailType": "html",
         "message": "={{ $json.html }}",
         "options": {}
       },
+      "typeVersion": 2.1,
+      "position": [
+        6192,
+        3200
+      ],
+      "id": "bf966194-7cf6-4daa-acee-1c59fa8821a6",
+      "name": "Enviar mail resumen",
+      "type": "n8n-nodes-base.gmail",
       "credentials": {
         "gmailOAuth2": {
           "id": "REEMPLAZAR",
@@ -303,56 +305,58 @@
       }
     },
     {
-      "typeVersion": 4.2,
-      "position": [
-        2240,
-        100
-      ],
-      "id": "avisar-latido-ok",
-      "name": "Avisar latido OK (healthchecks.io)",
-      "type": "n8n-nodes-base.httpRequest",
-      "onError": "continueRegularOutput",
       "parameters": {
-        "method": "GET",
         "url": "=https://hc-ping.com/TU_HEALTHCHECKS_UUID_AQUI",
         "options": {
           "timeout": 10000
         }
-      }
+      },
+      "typeVersion": 4.2,
+      "position": [
+        6416,
+        3200
+      ],
+      "id": "54858c76-5869-48cb-89b1-6c8ad7179b18",
+      "name": "Avisar latido OK (healthchecks.io)",
+      "type": "n8n-nodes-base.httpRequest",
+      "onError": "continueRegularOutput"
     },
     {
+      "parameters": {
+        "content": "## Cambios de esta version (v2)\n\n1. **pairedItem** agregado en \"Parsear ofertas\" y \"Aplicar tope de seguridad\".\n   Sin eso, $('Parsear ofertas').item devolvia el item equivocado y cada fila\n   del Sheet quedaba con el link de OTRA oferta.\n2. \"Parsear respuesta IA\" y \"Marcar fallo llamada IA\" ahora leen el link de\n   **Preparar prompt IA** (1 nodo atras, pareo intacto) en vez de \"Parsear\n   ofertas\" (4 nodos atras, cruzando dos Code nodes que cambian la cantidad\n   de items).\n3. \"Aplicar reglas de decision\" ahora devuelve una **fila plana y completa**:\n   todos los campos existen siempre, como string o numero. Nunca undefined.\n4. El mapeo del Sheet ya no hace `$json.stack.join(', ')` — eso explotaba en\n   cada item NO_PARSEABLE (esos objetos no tenian `stack`).\n5. `fecha_detectada` ahora **se setea de verdad** (antes se mapeaba pero no lo\n   escribia ningun nodo: la columna salia siempre vacia).\n6. \"Leer ofertas ya vistas\" apunta a la **misma pestania** que el escritor\n   (gid=0). Antes leia por nombre \"Ofertas\" y escribia en gid=0 — si no eran\n   la misma pestania, leia una y escribia en otra.\n7. \"Armar mail resumen\" lee de las reglas, no de la salida del Sheet (que\n   solo devuelve las columnas mapeadas y perdia el aviso de tope).\n8. Regla de titulo: solo descarta si el titulo excluyente es uno que **no\n   tenes** (grado, maestria, ingenieria). Antes descartaba por cualquiera.\n9. Frases de exclusion: se saco 'junior' y 'entry level' sueltos. Descartaban\n   justo los avisos que te sirven.\n10. Schedule Trigger con intervalo explicito: diario 9:00.\n\n## 2026-09-07 — Cron nunca disparaba nada + Computrabajo sacado\n\n- El Schedule Trigger no tenia conexion de salida (`main: [[]]` en el JSON\n  viejo, nunca sincronizado a este repo) — el workflow entero nunca corria\n  solo, dependia de que alguien lo ejecutara a mano. Reconectado a \"Leer\n  alertas Gmail\" + \"Leer ofertas ya vistas\" en paralelo.\n- Computrabajo salio del filtro de Gmail y del dispatcher de \"Parsear\n  ofertas\": sus mails son puro teaser (\"Empresas buscan talento para puestos\n  de X, postulate ahora\" + link a un grid de busqueda), nunca trajeron dato\n  real de oferta — confirmado leyendo un mail real via Gmail API. Indeed y\n  Bumeran si traen datos reales en el cuerpo, se mantienen.\n- Este workflow.json ahora es un export real de la instancia de n8n\n  (antes estaba desactualizado — la instancia tenia 8 fixes de la v2 que\n  nunca bajaron al repo). IDs de credenciales, Sheet ID y mail destino\n  sanitizados a REEMPLAZAR / TU_SHEET_ID_AQUI para el repo publico.\n\n## Antes de importar\n\n1. Confirmá que la pestania destino es gid=0 y que se llama \"Ofertas\".\n   Si el Sheet tiene otra pestania, cambiala en los DOS nodos de Sheets.\n2. Fila 1 del Sheet con estos encabezados EXACTOS, en cualquier orden:\n   dedup_key, fecha_detectada, empresa, puesto, modalidad, tipo_contrato,\n   horas_semanales, salario_min, salario_max, salario_moneda,\n   anios_experiencia_min, stack, postulantes, antiguedad_horas,\n   confianza_extraccion, link, estado, motivo, postulado\n3. La credencial de Google Sheets tiene que tener acceso a ese documento.\n4. Reemplazar el UUID en \"Avisar latido OK\" (healthchecks.io).\n5. Importar error-handler.json aparte y engancharlo en Settings -> Error Workflow.\n6. Si cambia el CV, editar CANDIDATO_STACK en \"Aplicar reglas de decision\".",
+        "height": 600,
+        "width": 620
+      },
       "typeVersion": 1,
       "position": [
-        -220,
-        -180
+        4176,
+        2576
       ],
-      "id": "nota-setup",
+      "id": "459e861b-f774-4917-9a7e-b16b79869d12",
       "name": "Sticky Note",
-      "type": "n8n-nodes-base.stickyNote",
+      "type": "n8n-nodes-base.stickyNote"
+    },
+    {
       "parameters": {
-        "width": 560,
-        "height": 420,
-        "content": "## ⚠️ Bug urgente encontrado (pendiente)\n\n\"Leer ofertas ya vistas\" falló en la corrida real del 28/8 9am con\n\"Requested entity was not found\" de Google Sheets — la credencial\n\"Google Sheets account\" no está viendo el Sheet `TU_SHEET_ID_AQUI`.\nRevisar: ¿la cuenta de Google conectada en esa credencial es la dueña\n(o tiene acceso) al Sheet? Sin arreglar esto el workflow no procesa nada.\n\n## Antes de importar\n\n1. Credenciales: Gmail OAuth2, Google Sheets OAuth2, Header Auth para\n   Anthropic (header `x-api-key`, valor `={{ $env.ANTHROPIC_API_KEY }}`)\n2. Reemplazar `TU_SHEET_ID_AQUI` en los 2 nodos de Google Sheets — mismo\n   documento en los dos, o \"Leer ofertas ya vistas\" no encuentra nada\n3. Reemplazar el mail de destino en \"Enviar mail resumen\"\n4. \"Parsear ofertas\" tiene un dispatcher por remitente (LinkedIn, Indeed,\n   Computrabajo validados contra mails reales; Bumeran cae a revisión\n   manual a propósito — le falta el html del mail, no el texto plano;\n   ZonaJobs no está sumado, no tenía alerta configurada) — leer el\n   comentario del Code node antes de confiar en los resultados de la\n   primera corrida\n5. Si cambia el CV, editar `CANDIDATO_STACK` a mano en \"Aplicar reglas de\n   decisión\" (y en reglas.js)\n6. Tope de ofertas por corrida: `MAX_OFERTAS_POR_CORRIDA` en \"Aplicar tope\n   de seguridad\" (default 30)\n7. Crear check en healthchecks.io (período 24hs, gracia 2hs), pegar el\n   UUID en \"Avisar latido OK\" acá y en \"Avisar fallo\" del error-handler.json\n8. Importar error-handler.json aparte, poner tu mail ahí, copiar su\n   Workflow ID, pegarlo en Settings → Error Workflow de este workflow"
-      }
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        3856,
+        3232
+      ],
+      "id": "8a24281d-0880-4138-b8ea-14e69b5ded69",
+      "name": "Schedule Trigger"
     }
   ],
   "connections": {
-    "Cron diario": {
-      "main": [
-        [
-          {
-            "node": "Leer alertas Gmail",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Leer ofertas ya vistas",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Leer alertas Gmail": {
       "main": [
         [
@@ -480,10 +484,27 @@
           }
         ]
       ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Leer ofertas ya vistas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer alertas Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "executionOrder": "v1",
+    "binaryMode": "separate",
     "errorWorkflow": "REEMPLAZAR_CON_ID_ERROR_WORKFLOW"
   }
 }
