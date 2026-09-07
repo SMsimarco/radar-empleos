@@ -5,28 +5,42 @@
 // y devuelve un estado + motivo. No llama a ningún LLM: todo lo que decide
 // viene de comparar campos ya extraídos contra estos umbrales, para que sea
 // testeable y editable sin tocar el prompt.
+//
+// Mirror del Code node "Aplicar reglas de decisión" del workflow (v2,
+// 2026-09-07) — si cambiás una regla, cambiala primero acá, corré
+// `node --test tests/`, y después pegala en el Code node.
 
-const MAX_ANIOS_TOLERADO = 3; // tope de años de experiencia excluyente que Marco tolera (tiene 2)
+const MAX_ANIOS_TOLERADO = 3;
 const MAX_POSTULANTES_BAJA_COMPETENCIA = 25;
 const MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA = 6;
 const MIN_COINCIDENCIAS_STACK = 2;
 
-// Stack real de Marco (perfil Full Stack / Automation Engineer, CLAUDE.md).
-// Editar acá a mano cuando cambie el CV — mismo valor que en el Code node
-// "Aplicar reglas de decisión" del workflow, mantener sincronizados.
-// Un solo término por tecnología: "node" ya matchea "Node.js" via includes(),
-// no hace falta (ni conviene) listar sinónimos — cada entrada duplicada
-// inflaba el conteo de coincidencias.
+// Stack real de Simón — mismo valor que en el Code node "Aplicar reglas de
+// decisión" del workflow, mantener sincronizados. Editar acá a mano cuando
+// cambie el CV.
 const CANDIDATO_STACK = [
-  'react', 'node', 'express', 'javascript', 'php',
-  'postgres', 'supabase', 'html', 'css', 'n8n',
+  'react', 'node', 'express', 'javascript', 'typescript',
+  'postgres', 'postgresql', 'supabase', 'n8n', 'docker',
+  'python', 'flutter', 'angular', 'html', 'css', 'wordpress',
 ];
 
-// Términos que, si aparecen en frases_exclusion, excluyen el perfil de Marco
-// (junior, 2 años de experiencia, sin título universitario terminado).
+// OJO: antes esta lista tenía 'junior' y 'entry level' sueltos, y como
+// alcanzaba con que la palabra apareciera en cualquier frase, descartaba
+// justo los avisos que le sirven a Simón ("Junior Developer welcome",
+// "entry level ok"). Ahora solo frases que de verdad excluyen.
 const TERMINOS_EXCLUYEN_PERFIL = [
-  'junior', 'entry level', 'entry-level', 'recent grad', 'recent graduate',
-  'bootcamp', 'no bootcamp',
+  'no junior', 'not junior', 'no juniors', 'not looking for junior', 'sin junior',
+  'senior only', 'solo senior', 'only senior', 'no entry level', 'no bootcamp',
+  'do not apply if', 'no apliques si', 'must have 5', '5+ years required',
+];
+
+// Títulos que Simón NO tiene. Una tecnicatura (en curso o no) no lo excluye
+// de un aviso que pide "tecnicatura" — antes descartaba por cualquier
+// titulo_excluyente sin importar cuál, aunque fuera uno que sí tiene o está
+// cursando.
+const TITULOS_QUE_NO_TENES = [
+  'grado', 'licenciatura', 'maestria', 'master', 'bachelor',
+  'ingenieria', 'ingeniero', 'phd', 'doctorado',
 ];
 
 // Estado explícito para "no se pudo extraer nada" — distinto de MIRAR
@@ -34,11 +48,19 @@ const TERMINOS_EXCLUYEN_PERFIL = [
 // "no sabemos qué hay ahí, un humano tiene que mirar el mail").
 const ESTADO_NO_PARSEABLE = 'NO_PARSEABLE';
 
+function norm(texto) {
+  return String(texto === null || texto === undefined ? '' : texto)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, ''); // saca acentos
+}
+
 // Dedup key única (nunca null) para ofertas que no se pudieron parsear —
 // si dos usaran la misma key (o null), el appendOrUpdate por dedup_key de
 // "Guardar en Sheet" pisaría una fila con la otra. sufijoUnico es param
 // para poder testear con un valor fijo; en producción (Code node del
-// workflow) siempre es Date.now().
+// workflow) el sufijo real suma un contador + random, esto alcanza para
+// garantizar la unicidad que testeamos acá.
 function generarDedupKeyError(link, sufijoUnico) {
   const base = link || 'sin-link';
   const sufijo = sufijoUnico !== undefined ? sufijoUnico : Date.now();
@@ -62,9 +84,7 @@ function decidirError(link, sufijoUnico) {
 
 function normalizarEmpresaPuesto(empresa, puesto) {
   const normalizar = (texto) =>
-    (texto || '')
-      .toLowerCase()
-      .normalize('NFD').replace(new RegExp('[̀-ͯ]', 'g'), '') // saca acentos
+    norm(texto)
       .replace(/\b(s\.?a\.?|s\.?r\.?l\.?|inc\.?|ltd\.?|llc\.?)\b/g, '')
       .replace(/[^a-z0-9]+/g, ' ')
       .trim();
@@ -72,21 +92,30 @@ function normalizarEmpresaPuesto(empresa, puesto) {
 }
 
 function contarCoincidenciasStack(ofertaStack) {
-  const stackOferta = (ofertaStack || []).map((t) => t.toLowerCase());
+  const stackOferta = (ofertaStack || []).map(norm).filter((t) => t.length >= 2);
   return CANDIDATO_STACK.filter((tech) =>
-    stackOferta.some((t) => t.includes(tech) || tech.includes(t))
+    stackOferta.some((t) => t === tech || t.includes(tech))
   ).length;
 }
 
 function fraseExcluyePerfil(frasesExclusion) {
-  const texto = (frasesExclusion || []).join(' ').toLowerCase();
+  const texto = norm((frasesExclusion || []).join(' '));
   return TERMINOS_EXCLUYEN_PERFIL.find((termino) => texto.includes(termino)) || null;
+}
+
+// Solo excluye si el título pedido de forma excluyente es uno que Simón NO
+// tiene (grado, maestría, ingeniería...). Un titulo_excluyente=true con un
+// título que sí tiene (o no calza en la lista) no lo descarta.
+function tituloQueNoTenes(tituloRequerido) {
+  const t = norm(tituloRequerido);
+  if (!t) return null;
+  return TITULOS_QUE_NO_TENES.find((x) => t.includes(x)) || null;
 }
 
 /**
  * @param {object} oferta - oferta extraída, esquema en esquema_oferta.schema.json
  * @param {object} contexto
- * @param {boolean} contexto.yaPostulado - si Marco ya se postuló a empresa+puesto (dedup resuelto afuera con normalizarEmpresaPuesto)
+ * @param {boolean} contexto.yaPostulado - si Simón ya se postuló a empresa+puesto (dedup resuelto afuera con normalizarEmpresaPuesto)
  * @returns {{estado: 'DESCARTAR'|'POSTULAR YA'|'MIRAR', motivo: string}}
  */
 function decidir(oferta, contexto = {}) {
@@ -96,23 +125,23 @@ function decidir(oferta, contexto = {}) {
     return { estado: 'DESCARTAR', motivo: 'Ya te postulaste a este puesto en esta empresa.' };
   }
 
-  if (oferta.anios_experiencia_min > MAX_ANIOS_TOLERADO && oferta.anios_excluyente === true) {
+  if (Number(oferta.anios_experiencia_min) > MAX_ANIOS_TOLERADO && oferta.anios_excluyente === true) {
     return {
       estado: 'DESCARTAR',
-      motivo: `Pide ${oferta.anios_experiencia_min}+ años de experiencia de forma excluyente (tenés ${MAX_ANIOS_TOLERADO - 1}).`,
+      motivo: `Pide ${oferta.anios_experiencia_min}+ años de experiencia de forma excluyente.`,
     };
   }
 
-  if (oferta.titulo_excluyente === true) {
+  if (oferta.titulo_excluyente === true && tituloQueNoTenes(oferta.titulo_requerido)) {
     return {
       estado: 'DESCARTAR',
-      motivo: `Pide título (${oferta.titulo_requerido || 'sin especificar'}) de forma excluyente.`,
+      motivo: `Pide título (${oferta.titulo_requerido || 'sin especificar'}) de forma excluyente y no lo tenés.`,
     };
   }
 
   const fraseExcluyente = fraseExcluyePerfil(oferta.frases_exclusion);
   if (fraseExcluyente) {
-    const cita = oferta.frases_exclusion.find((f) => f.toLowerCase().includes(fraseExcluyente));
+    const cita = (oferta.frases_exclusion || []).find((f) => norm(f).includes(fraseExcluyente)) || fraseExcluyente;
     return { estado: 'DESCARTAR', motivo: `El aviso excluye tu perfil: "${cita}"` };
   }
 
@@ -120,10 +149,10 @@ function decidir(oferta, contexto = {}) {
   const coincidenciaReal = coincidencias >= MIN_COINCIDENCIAS_STACK;
 
   const senialesCompetenciaBaja = [];
-  if (oferta.postulantes !== null && oferta.postulantes < MAX_POSTULANTES_BAJA_COMPETENCIA) {
+  if (oferta.postulantes !== null && oferta.postulantes !== undefined && Number(oferta.postulantes) < MAX_POSTULANTES_BAJA_COMPETENCIA) {
     senialesCompetenciaBaja.push(`${oferta.postulantes} postulantes`);
   }
-  if (oferta.antiguedad_horas !== null && oferta.antiguedad_horas < MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA) {
+  if (oferta.antiguedad_horas !== null && oferta.antiguedad_horas !== undefined && Number(oferta.antiguedad_horas) < MAX_ANTIGUEDAD_HORAS_BAJA_COMPETENCIA) {
     senialesCompetenciaBaja.push(`publicada hace ${oferta.antiguedad_horas}hs`);
   }
   if (oferta.postulacion_rapida === true) {
@@ -154,6 +183,7 @@ module.exports = {
   normalizarEmpresaPuesto,
   contarCoincidenciasStack,
   fraseExcluyePerfil,
+  tituloQueNoTenes,
   generarDedupKeyError,
   ESTADO_NO_PARSEABLE,
 };

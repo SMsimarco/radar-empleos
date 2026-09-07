@@ -149,3 +149,47 @@ test('13. respuesta inválida sin link -> dedup_key igual usa "sin-link", nunca 
   const { dedup_key } = decidirError(null, 'sufijo-fijo-test');
   assert.equal(dedup_key, 'no_parseable::sin-link::sufijo-fijo-test');
 });
+
+test('14. "junior" suelto en frases_exclusion (sin ser realmente excluyente) -> NO descarta (bug viejo: esto eliminaba justo los avisos que sirven)', () => {
+  const oferta = ofertaBase({
+    stack: ['React', 'Node', 'PostgreSQL'],
+    frases_exclusion: ['Junior developer welcome to apply', 'entry level candidates encouraged'],
+    postulantes: 5,
+  });
+  const { estado } = decidir(oferta);
+  assert.notEqual(estado, 'DESCARTAR');
+});
+
+test('15. "not looking for junior" sí es excluyente de verdad -> DESCARTAR', () => {
+  const oferta = ofertaBase({
+    stack: ['React', 'Node', 'PostgreSQL'],
+    frases_exclusion: ['We are not looking for junior candidates.'],
+    postulantes: 5,
+  });
+  const { estado, motivo } = decidir(oferta);
+  assert.equal(estado, 'DESCARTAR');
+  assert.match(motivo, /not looking for junior/i);
+});
+
+test('16. título excluyente pero es uno que sí tenés (tecnicatura) -> NO descarta por título (bug viejo: descartaba por cualquier título excluyente)', () => {
+  const oferta = ofertaBase({
+    stack: ['React', 'Node', 'PostgreSQL'],
+    titulo_requerido: 'tecnicatura',
+    titulo_excluyente: true,
+    postulantes: 5,
+  });
+  const { estado } = decidir(oferta);
+  assert.notEqual(estado, 'DESCARTAR');
+});
+
+test('17. título excluyente que no tenés (ingeniería) -> DESCARTAR', () => {
+  const oferta = ofertaBase({
+    stack: ['React', 'Node', 'PostgreSQL'],
+    titulo_requerido: 'ingeniería en sistemas',
+    titulo_excluyente: true,
+    postulantes: 5,
+  });
+  const { estado, motivo } = decidir(oferta);
+  assert.equal(estado, 'DESCARTAR');
+  assert.match(motivo, /título/i);
+});
