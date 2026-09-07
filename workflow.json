@@ -339,7 +339,18 @@
   "connections": {
     "Cron diario": {
       "main": [
-        []
+        [
+          {
+            "node": "Leer alertas Gmail",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer ofertas ya vistas",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Leer alertas Gmail": {
